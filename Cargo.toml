@@ -1,0 +1,28 @@
+[package]
+name = "sentiric-orchestrator"
+version = "0.1.0"
+edition = "2021"
+authors = ["Sentiric Team <dev@sentiric.ai>"]
+license = "AGPL-3.0"
+
+[dependencies]
+# Web & API
+axum = { version = "0.7", features = ["ws"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Infrastructure
+bollard = "0.16" # Docker Socket API
+reqwest = { version = "0.12", features = ["json"] } # GHCR Polling
+tonic = "0.12" # gRPC Support
+
+# Observability & Utils
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1.0"
+thiserror = "1.0"
+
+[build-dependencies]
+tonic-build = "0.12"

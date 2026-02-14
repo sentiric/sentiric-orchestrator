@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SENTIRIC | ORCHESTRATOR</title>
+    <style>
+        :root { --primary: #00ff9d; --bg: #050505; --card: #111; --text: #eee; --border: #222; }
+        body { background: var(--bg); color: var(--text); font-family: 'JetBrains Mono', monospace; margin: 0; padding: 40px; }
+        header { border-bottom: 2px solid var(--primary); padding-bottom: 20px; margin-bottom: 30px; display: flex; justify-content: space-between; align-items: baseline; }
+        h1 { margin: 0; letter-spacing: 2px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 20px; }
+        .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 20px; transition: 0.2s; }
+        .card:hover { border-color: var(--primary); box-shadow: 0 0 15px rgba(0,255,157,0.1); }
+        .svc-name { font-size: 18px; font-weight: bold; color: var(--primary); margin-bottom: 10px; }
+        .meta { font-size: 11px; color: #666; margin: 5px 0; }
+        .status-pill { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: bold; background: #222; }
+        .active { color: #000; background: var(--primary); }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>📟 SENTIRIC <span>ORCHESTRATOR</span></h1>
+        <div id="mesh-info">SCANNING MESH...</div>
+    </header>
+
+    <div id="app" class="grid">
+        <!-- Dynamic Cards -->
+    </div>
+
+    <script>
+        async function fetchStatus() {
+            try {
+                const res = await fetch('/api/status');
+                const data = await res.json();
+                render(data);
+            } catch (e) { console.error("Poll error", e); }
+        }
+
+        function render(services) {
+            const container = document.getElementById('app');
+            document.getElementById('mesh-info').innerText = `${services.length} SERVICES DETECTED`;
+            
+            container.innerHTML = services.map(s => `
+                <div class="card">
+                    <div class="svc-name">${s.name}</div>
+                    <div class="status-pill ${s.status.includes('Up') ? 'active' : ''}">${s.status.toUpperCase()}</div>
+                    <div class="meta" style="margin-top:15px">IMAGE: ${s.image}</div>
+                    <div class="meta">LOCAL SHA: ${s.local_sha.substring(0, 20)}...</div>
+                    <div class="meta">REMOTE SHA: <span style="color:#00d4ff">${s.remote_sha}</span></div>
+                    <div class="meta" style="border-top:1px solid #222; padding-top:10px; margin-top:10px">LAST CHECK: ${s.last_sync}</div>
+                </div>
+            `).join('');
+        }
+
+        setInterval(fetchStatus, 5000);
+        fetchStatus();
+    </script>
+</body>
+</html>
