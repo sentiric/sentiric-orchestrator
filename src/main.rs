@@ -12,13 +12,13 @@ use bollard::container::{
     Config, CreateContainerOptions, StartContainerOptions
 };
 use bollard::image::CreateImageOptions;
-use futures_util::StreamExt; // [FIX]: Trait in scope
+use futures_util::StreamExt;
 use std::env;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use std::time::Duration;
-use tracing::{info, error}; // [FIX]: Removed unused warn
+use tracing::{info, error};
 use serde::Deserialize;
 
 #[derive(serde::Serialize, Clone, Debug)]
@@ -48,7 +48,7 @@ async fn main() -> anyhow::Result<()> {
             .add_directive(tracing::Level::INFO.into()))
         .init();
 
-    info!("📟 Sentiric Orchestrator v0.3.5 starting (Native Docker Mode)...");
+    info!("📟 Sentiric Orchestrator v0.3.6 starting (Identity Preservation Mode)...");
 
     let docker = Docker::connect_with_local_defaults()
         .expect("❌ Failed to connect to Docker socket.");
@@ -129,7 +129,7 @@ async fn status_api_handler(State(state): State<Arc<AppState>>) -> Json<Vec<Serv
     Json(guard.clone())
 }
 
-/// Native Docker Update Logic
+/// Native Docker Update Logic with Metadata Preservation
 async fn update_handler(
     State(state): State<Arc<AppState>>,
     Query(params): Query<DeployParams>
@@ -177,10 +177,12 @@ async fn update_handler(
         return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("Disk error: {}", e));
     }
 
-    // 5. Recreate with identical config
-    info!("🏗️ Recreating: {}", svc_name);
+    // 5. Recreate with identical config (INCLUDING LABELS FOR COMPOSE IDENTITY)
+    info!("🏗️ Recreating with Compose Metadata: {}", svc_name);
     let config = Config {
         image: Some(image_name.clone()),
+        // [FIX]: Krtik metadata taşıma katmanı
+        labels: container_info.config.as_ref().and_then(|c| c.labels.clone()), // Compose kimliği burada!
         env: container_info.config.as_ref().and_then(|c| c.env.clone()),
         host_config: container_info.host_config.clone(),
         networking_config: container_info.network_settings.as_ref().and_then(|n| {
@@ -198,8 +200,8 @@ async fn update_handler(
                 error!("❌ Boot failed: {}", e);
                 return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("Boot error: {}", e));
             }
-            info!("✅ Successfully redeployed: {}", svc_name);
-            (axum::http::StatusCode::OK, format!("{} re-deployed successfully.", svc_name))
+            info!("✅ Successfully redeployed (Identity Preserved): {}", svc_name);
+            (axum::http::StatusCode::OK, format!("{} re-deployed successfully (Compose intact).", svc_name))
         },
         Err(e) => {
             error!("❌ Orchestration failed: {}", e);
