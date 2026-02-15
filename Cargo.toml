@@ -1,23 +1,23 @@
 [package]
 name = "sentiric-orchestrator"
-version = "0.1.0"
+version = "0.3.5"
 edition = "2021"
 authors = ["Sentiric Team <dev@sentiric.ai>"]
 license = "AGPL-3.0"
 
 [dependencies]
-# Web & API
+# Web Server
 axum = { version = "0.7", features = ["ws"] }
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1.40", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
-# Infrastructure
-bollard = "0.16" # Docker Socket API
-reqwest = { version = "0.12", features = ["json"] } # GHCR Polling
-tonic = "0.12" # gRPC Support
+# Infrastructure & Docker
+bollard = "0.16"
+futures-util = "0.3" # [FIX]: Missing crate added
+reqwest = { version = "0.12", features = ["json"] }
 
-# Observability & Utils
+# Gözlemlenebilirlik
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 chrono = { version = "0.4", features = ["serde"] }

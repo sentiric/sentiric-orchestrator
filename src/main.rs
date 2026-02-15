@@ -1,13 +1,25 @@
 // sentiric-orchestrator/src/main.rs
 
-use axum::{response::Html, routing::get, Router};
+use axum::{
+    extract::{State, Query},
+    response::{Html, IntoResponse},
+    routing::{get, post},
+    Json, Router,
+};
 use bollard::Docker;
+use bollard::container::{
+    ListContainersOptions, StopContainerOptions, RemoveContainerOptions, 
+    Config, CreateContainerOptions, StartContainerOptions
+};
+use bollard::image::CreateImageOptions;
+use futures_util::StreamExt; // [FIX]: Trait in scope
 use std::env;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use std::time::Duration;
-use tracing::{info, error, debug};
+use tracing::{info, error}; // [FIX]: Removed unused warn
+use serde::Deserialize;
 
 #[derive(serde::Serialize, Clone, Debug)]
 struct ServiceInstance {
@@ -16,50 +28,53 @@ struct ServiceInstance {
     image: String,
     status: String,
     local_sha: String,
-    remote_sha: String,
     last_sync: String,
 }
 
+#[derive(Deserialize)]
+struct DeployParams {
+    service: String,
+}
+
 struct AppState {
+    docker: Docker,
     instances: Mutex<Vec<ServiceInstance>>,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // 1. Logger: RUST_LOG=debug cargo run diyerek detay görebilirsiniz
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env()
             .add_directive(tracing::Level::INFO.into()))
         .init();
 
-    info!("📟 Sentiric Orchestrator v0.1.1 starting...");
+    info!("📟 Sentiric Orchestrator v0.3.5 starting (Native Docker Mode)...");
+
+    let docker = Docker::connect_with_local_defaults()
+        .expect("❌ Failed to connect to Docker socket.");
 
     let shared_state = Arc::new(AppState {
+        docker: docker.clone(),
         instances: Mutex::new(Vec::new()),
     });
 
-    // 2. Docker Engine Connection
-    let docker = Arc::new(Docker::connect_with_local_defaults()
-        .expect("❌ Failed to connect to Docker socket."));
-
-    // 3. Watcher Task (Her 10 saniyede bir tara - Test için hızlandırıldı)
+    // --- 1. WATCHER TASK (SCANNER) ---
     let watcher_state = shared_state.clone();
-    let watcher_docker = docker.clone();
     tokio::spawn(async move {
-        info!("🔍 Watcher activated: Auto-detecting all local containers.");
         let mut interval = tokio::time::interval(Duration::from_secs(10));
         loop {
             interval.tick().await;
-            if let Err(e) = scan_local_services(&watcher_docker, &watcher_state).await {
-                error!("❌ Scan error: {}", e);
+            if let Err(e) = scan_local_services(&watcher_state).await {
+                error!("❌ Local scan error: {}", e);
             }
         }
     });
 
-    // 4. API & UI
+    // --- 2. API & UI ROUTES ---
     let app = Router::new()
         .route("/", get(index_handler))
         .route("/api/status", get(status_api_handler))
+        .route("/api/update", post(update_handler))
         .with_state(shared_state);
 
     let http_port: u16 = env::var("ORCHESTRTOR_SERVICE_HTTP_PORT")
@@ -75,29 +90,26 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn scan_local_services(docker: &Docker, state: &Arc<AppState>) -> anyhow::Result<()> {
-    use bollard::container::ListContainersOptions;
-
+async fn scan_local_services(state: &Arc<AppState>) -> anyhow::Result<()> {
     let options = Some(ListContainersOptions::<String> {
-        all: true, // Durmuş (exited) konteynerleri de gör
+        all: true,
         ..Default::default()
     });
 
-    let containers = docker.list_containers(options).await?;
+    let containers = state.docker.list_containers(options).await?;
     let mut current_instances = Vec::new();
 
     for container in containers {
-        let name = container.names.unwrap_or_default().join(", ").trim_start_matches('/').to_string();
-        
-        // [ADIM 1 FIX]: Filtreyi kaldırıyoruz, her şeyi görelim.
+        let name = container.names.unwrap_or_default().join("").trim_start_matches('/').to_string();
+        if name.is_empty() { continue; }
+
         let instance = ServiceInstance {
-            name: name.clone(),
+            name,
             container_id: container.id.clone().unwrap_or_default(),
             image: container.image.unwrap_or_default(),
             status: container.status.unwrap_or_default(),
-            // SHA'nın ilk 12 karakterini alalım (Docker tarzı)
-            local_sha: container.image_id.unwrap_or_else(|| "unknown".into()).replace("sha256:", "")[..12].to_string(),
-            remote_sha: "LATEST".into(), 
+            local_sha: container.image_id.unwrap_or_else(|| "unknown".into())
+                .replace("sha256:", "").get(..12).unwrap_or("unknown").to_string(),
             last_sync: chrono::Utc::now().format("%H:%M:%S").to_string(),
         };
         current_instances.push(instance);
@@ -105,13 +117,93 @@ async fn scan_local_services(docker: &Docker, state: &Arc<AppState>) -> anyhow::
 
     let mut guard = state.instances.lock().await;
     *guard = current_instances;
-    info!("📊 Scan complete: {} containers detected.", guard.len());
-    
     Ok(())
 }
 
+// --- HANDLERS ---
+
 async fn index_handler() -> Html<&'static str> { Html(include_str!("index.html")) }
-async fn status_api_handler(axum::extract::State(state): axum::extract::State<Arc<AppState>>) -> axum::Json<Vec<ServiceInstance>> {
+
+async fn status_api_handler(State(state): State<Arc<AppState>>) -> Json<Vec<ServiceInstance>> {
     let guard = state.instances.lock().await;
-    axum::Json(guard.clone())
+    Json(guard.clone())
+}
+
+/// Native Docker Update Logic
+async fn update_handler(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<DeployParams>
+) -> impl IntoResponse {
+    let svc_name = params.service;
+    info!("⚙️ Orchestrating update for: {}", svc_name);
+
+    // 1. Inspect existing container config
+    let container_info = match state.docker.inspect_container(&svc_name, None).await {
+        Ok(info) => info,
+        Err(e) => {
+            error!("❌ Container lookup failed: {}", e);
+            return (axum::http::StatusCode::NOT_FOUND, format!("Container {} not found", svc_name));
+        }
+    };
+
+    let image_name = container_info.config.as_ref().and_then(|c| c.image.clone()).unwrap();
+
+    // 2. Pull latest image from registry
+    info!("📥 Pulling: {}", image_name);
+    let mut pull_stream = state.docker.create_image(
+        Some(CreateImageOptions {
+            from_image: image_name.clone(),
+            ..Default::default()
+        }),
+        None,
+        None,
+    );
+
+    while let Some(pull_result) = pull_stream.next().await {
+        if let Err(e) = pull_result {
+            error!("❌ Pull failed: {}", e);
+            return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("Registry error: {}", e));
+        }
+    }
+
+    // 3. Graceful Stop
+    info!("🛑 Stopping: {}", svc_name);
+    let _ = state.docker.stop_container(&svc_name, Some(StopContainerOptions { t: 10 })).await;
+
+    // 4. Forced Removal
+    info!("🗑️ Removing: {}", svc_name);
+    if let Err(e) = state.docker.remove_container(&svc_name, Some(RemoveContainerOptions { force: true, ..Default::default() })).await {
+        error!("❌ Cleanup failed: {}", e);
+        return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("Disk error: {}", e));
+    }
+
+    // 5. Recreate with identical config
+    info!("🏗️ Recreating: {}", svc_name);
+    let config = Config {
+        image: Some(image_name.clone()),
+        env: container_info.config.as_ref().and_then(|c| c.env.clone()),
+        host_config: container_info.host_config.clone(),
+        networking_config: container_info.network_settings.as_ref().and_then(|n| {
+            Some(bollard::container::NetworkingConfig {
+                endpoints_config: n.networks.clone().unwrap_or_default(),
+            })
+        }),
+        ..Default::default()
+    };
+
+    match state.docker.create_container(Some(CreateContainerOptions { name: svc_name.clone(), platform: None }), config).await {
+        Ok(_) => {
+            // 6. Start
+            if let Err(e) = state.docker.start_container(&svc_name, None::<StartContainerOptions<String>>).await {
+                error!("❌ Boot failed: {}", e);
+                return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("Boot error: {}", e));
+            }
+            info!("✅ Successfully redeployed: {}", svc_name);
+            (axum::http::StatusCode::OK, format!("{} re-deployed successfully.", svc_name))
+        },
+        Err(e) => {
+            error!("❌ Orchestration failed: {}", e);
+            (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("Config error: {}", e))
+        }
+    }
 }

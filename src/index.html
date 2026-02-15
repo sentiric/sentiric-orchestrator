@@ -2,59 +2,66 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SENTIRIC | ORCHESTRATOR</title>
+    <title>SENTIRIC | ORCHESTRATOR PRO</title>
     <style>
         :root { --primary: #00ff9d; --bg: #050505; --card: #111; --text: #eee; --border: #222; }
-        body { background: var(--bg); color: var(--text); font-family: 'JetBrains Mono', monospace; margin: 0; padding: 40px; }
-        header { border-bottom: 2px solid var(--primary); padding-bottom: 20px; margin-bottom: 30px; display: flex; justify-content: space-between; align-items: baseline; }
-        h1 { margin: 0; letter-spacing: 2px; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 20px; }
-        .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 20px; transition: 0.2s; }
-        .card:hover { border-color: var(--primary); box-shadow: 0 0 15px rgba(0,255,157,0.1); }
-        .svc-name { font-size: 18px; font-weight: bold; color: var(--primary); margin-bottom: 10px; }
-        .meta { font-size: 11px; color: #666; margin: 5px 0; }
-        .status-pill { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: bold; background: #222; }
-        .active { color: #000; background: var(--primary); }
+        body { background: var(--bg); color: var(--text); font-family: 'JetBrains Mono', monospace; margin: 0; padding: 20px; }
+        header { border-bottom: 2px solid var(--primary); padding: 10px 0; margin-bottom: 25px; display: flex; justify-content: space-between; align-items: center; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 15px; }
+        .card { background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 18px; position: relative; }
+        .svc-name { font-size: 18px; font-weight: bold; color: var(--primary); }
+        .meta { font-size: 10px; color: #666; margin: 4px 0; }
+        .btn-update { 
+            background: none; border: 1px solid var(--primary); color: var(--primary); 
+            padding: 8px 18px; cursor: pointer; font-size: 11px; font-weight: 900;
+            margin-top: 15px; border-radius: 4px; transition: 0.2s; width: 100%;
+        }
+        .btn-update:hover { background: var(--primary); color: #000; }
+        .btn-update:disabled { opacity: 0.4; cursor: not-allowed; }
+        .status { float: right; font-size: 10px; padding: 2px 8px; border-radius: 4px; background: #222; font-weight: bold; }
+        .active { color: var(--primary); border: 1px solid var(--primary); }
     </style>
 </head>
 <body>
     <header>
-        <h1>📟 SENTIRIC <span>ORCHESTRATOR</span></h1>
-        <div id="mesh-info">SCANNING MESH...</div>
+        <div>📟 SENTIRIC <b>ORCHESTRATOR</b> <small id="count">SCANNING...</small></div>
+        <div style="font-size: 10px; color: #444;">CLUSTER LIFECYCLE MANAGEMENT</div>
     </header>
-
-    <div id="app" class="grid">
-        <!-- Dynamic Cards -->
-    </div>
+    <div id="app" class="grid"></div>
 
     <script>
-        async function fetchStatus() {
+        async function runUpdate(name, btn) {
+            if(!confirm(`Deploy latest version for ${name}?`)) return;
+            btn.disabled = true;
+            btn.innerText = "ORCHESTRATING...";
+            try {
+                const res = await fetch(`/api/update?service=${name}`, { method: 'POST' });
+                const txt = await res.text();
+                alert(txt);
+            } catch (e) { alert("Execution Fail"); }
+            btn.disabled = false;
+            btn.innerText = "PULL & RESTART";
+        }
+
+        async function refresh() {
             try {
                 const res = await fetch('/api/status');
                 const data = await res.json();
-                render(data);
-            } catch (e) { console.error("Poll error", e); }
+                document.getElementById('count').innerText = `${data.length} CONTAINERS FOUND`;
+                document.getElementById('app').innerHTML = data.map(s => `
+                    <div class="card">
+                        <span class="status ${s.status.includes('Up') ? 'active' : ''}">${s.status.toUpperCase()}</span>
+                        <div class="svc-name">${s.name}</div>
+                        <div class="meta" style="color:#aaa; margin-top:10px">IMAGE: ${s.image}</div>
+                        <div class="meta">IMAGE-SHA: ${s.local_sha}</div>
+                        <button class="btn-update" onclick="runUpdate('${s.name}', this)">PULL & RESTART</button>
+                        <div class="meta" style="margin-top:10px; opacity:0.4; text-align:right">SYNC: ${s.last_sync}</div>
+                    </div>
+                `).join('');
+            } catch (e) {}
         }
-
-        function render(services) {
-            const container = document.getElementById('app');
-            document.getElementById('mesh-info').innerText = `${services.length} SERVICES DETECTED`;
-            
-            container.innerHTML = services.map(s => `
-                <div class="card">
-                    <div class="svc-name">${s.name}</div>
-                    <div class="status-pill ${s.status.includes('Up') ? 'active' : ''}">${s.status.toUpperCase()}</div>
-                    <div class="meta" style="margin-top:15px">IMAGE: ${s.image}</div>
-                    <div class="meta">LOCAL SHA: ${s.local_sha.substring(0, 20)}...</div>
-                    <div class="meta">REMOTE SHA: <span style="color:#00d4ff">${s.remote_sha}</span></div>
-                    <div class="meta" style="border-top:1px solid #222; padding-top:10px; margin-top:10px">LAST CHECK: ${s.last_sync}</div>
-                </div>
-            `).join('');
-        }
-
-        setInterval(fetchStatus, 5000);
-        fetchStatus();
+        setInterval(refresh, 5000);
+        refresh();
     </script>
 </body>
 </html>
