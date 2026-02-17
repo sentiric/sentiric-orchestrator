@@ -2,309 +2,124 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>SENTIRIC | ORCHESTRATOR v0.4</title>
+    <title>SENTIRIC | CLUSTER MANAGER</title>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&display=swap" rel="stylesheet">
     <style>
-        :root {
-            --bg-color: #050505;
-            --card-bg: #0f0f0f;
-            --accent: #00ff9d;
-            --accent-dim: rgba(0, 255, 157, 0.1);
-            --danger: #ff4444;
-            --text-main: #e0e0e0;
-            --text-dim: #666;
-            --border: #222;
-        }
+        :root { --bg: #050505; --card: #0f0f0f; --accent: #00ff9d; --warn: #ffae00; --danger: #ff4444; --gpu: #bd00ff; --text: #e0e0e0; --border: #222; }
+        body { background: var(--bg); color: var(--text); font-family: 'JetBrains Mono', monospace; margin: 0; padding: 20px; }
+        header { display: flex; justify-content: space-between; border-bottom: 1px solid var(--border); padding-bottom: 15px; margin-bottom: 20px; }
+        .brand { font-size: 20px; font-weight: 800; } .brand span { color: var(--accent); }
+        .section-title { font-size: 12px; color: #666; font-weight: bold; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 1px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 15px; margin-bottom: 30px; }
         
-        * { box-sizing: border-box; }
+        .node-card { background: #0a0a0a; border: 1px solid var(--border); border-left: 3px solid var(--accent); padding: 15px; border-radius: 4px; }
+        .node-card.offline { border-left-color: var(--danger); opacity: 0.7; }
+        .node-header { display: flex; justify-content: space-between; font-weight: bold; margin-bottom: 10px; }
+        .metric-bar { height: 4px; background: #222; margin-top: 5px; border-radius: 2px; overflow: hidden; }
+        .metric-fill { height: 100%; background: var(--accent); transition: width 0.5s; }
+        .metric-label { display: flex; justify-content: space-between; font-size: 10px; color: #888; margin-top: 8px; }
         
-        body {
-            background-color: var(--bg-color);
-            color: var(--text-main);
-            font-family: 'JetBrains Mono', monospace;
-            margin: 0;
-            padding: 30px;
-            font-size: 13px;
-        }
-
-        header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 1px solid var(--border);
-            padding-bottom: 20px;
-            margin-bottom: 30px;
-        }
-
-        .brand {
-            font-size: 24px;
-            font-weight: 800;
-            letter-spacing: -1px;
-        }
-        .brand span { color: var(--accent); }
-
-        .grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
-            gap: 20px;
-        }
-
-        .card {
-            background: var(--card-bg);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 20px;
-            position: relative;
-            transition: transform 0.2s, border-color 0.2s;
-        }
-
-        .card:hover {
-            border-color: #333;
-            transform: translateY(-2px);
-        }
-
-        .card-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            margin-bottom: 15px;
-        }
-
-        .svc-name {
-            font-size: 16px;
-            font-weight: 700;
-            color: #fff;
-            margin-bottom: 4px;
-        }
-
-        .svc-image {
-            color: var(--text-dim);
-            font-size: 11px;
-            word-break: break-all;
-        }
-
-        .status-badge {
-            font-size: 10px;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-weight: 800;
-            text-transform: uppercase;
-            background: #222;
-            color: #888;
-        }
-        .status-badge.up { background: var(--accent-dim); color: var(--accent); border: 1px solid var(--accent); }
-        .status-badge.down { background: rgba(255, 68, 68, 0.1); color: var(--danger); border: 1px solid var(--danger); }
-
-        .meta-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-            margin-bottom: 20px;
-            font-size: 11px;
-            color: var(--text-dim);
-        }
-
-        .meta-item b { color: #aaa; display: block; margin-bottom: 2px; }
-        .hash { font-family: monospace; color: #fff; }
-
-        .actions {
-            display: flex;
-            gap: 10px;
-            align-items: center;
-            border-top: 1px solid var(--border);
-            padding-top: 15px;
-        }
-
-        button {
-            background: transparent;
-            border: 1px solid var(--accent);
-            color: var(--accent);
-            padding: 8px 16px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-family: inherit;
-            font-weight: 700;
-            font-size: 11px;
-            transition: all 0.2s;
-            flex: 1;
-        }
-
-        button:hover { background: var(--accent); color: #000; }
-        button:disabled { opacity: 0.5; cursor: not-allowed; filter: grayscale(1); }
-
-        /* Toggle Switch */
-        .toggle-container {
-            display: flex;
-            align-items: center;
-            font-size: 11px;
-            color: #aaa;
-            gap: 8px;
-        }
-        .switch {
-            position: relative;
-            display: inline-block;
-            width: 34px;
-            height: 18px;
-        }
-        .switch input { opacity: 0; width: 0; height: 0; }
-        .slider {
-            position: absolute;
-            cursor: pointer;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background-color: #333;
-            transition: .4s;
-            border-radius: 18px;
-        }
-        .slider:before {
-            position: absolute;
-            content: "";
-            height: 12px;
-            width: 12px;
-            left: 3px;
-            bottom: 3px;
-            background-color: white;
-            transition: .4s;
-            border-radius: 50%;
-        }
-        input:checked + .slider { background-color: var(--accent); }
-        input:checked + .slider:before { transform: translateX(16px); }
-
-        #toast {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            background: #222;
-            border: 1px solid var(--accent);
-            color: #fff;
-            padding: 15px 25px;
-            border-radius: 4px;
-            display: none;
-            z-index: 9999;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.5);
-        }
+        .svc-card { background: var(--card); border: 1px solid var(--border); padding: 15px; border-radius: 4px; }
+        .svc-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .svc-name { font-weight: bold; color: #fff; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--danger); }
+        .status-dot.up { background: var(--accent); box-shadow: 0 0 5px var(--accent); }
+        .svc-meta { font-size: 10px; color: #666; margin-bottom: 10px; display: flex; justify-content: space-between; }
+        .actions { display: flex; gap: 10px; margin-top: 10px; }
+        button { background: transparent; border: 1px solid #333; color: #aaa; padding: 5px 10px; font-family: inherit; font-size: 10px; cursor: pointer; border-radius: 3px; flex: 1; }
+        button:hover { border-color: var(--accent); color: var(--accent); }
     </style>
 </head>
 <body>
     <header>
         <div class="brand">SENTIRIC <span>ORCHESTRATOR</span></div>
-        <div style="text-align: right">
-            <div id="clock" style="font-size: 18px; font-weight: bold;">--:--:--</div>
-            <div style="font-size: 11px; color: #666">CLUSTER CONTROLLER</div>
-        </div>
+        <div style="font-size: 11px; color: #666">CLUSTER MANAGER v0.6</div>
     </header>
 
-    <div id="app" class="grid">
-        <!-- Cards will be injected here -->
-    </div>
+    <div class="section-title">INFRASTRUCTURE NODES (CPU / RAM / GPU)</div>
+    <div id="nodes-grid" class="grid"></div>
 
-    <div id="toast">Operation Successful</div>
+    <div class="section-title">LOCAL MICROSERVICES</div>
+    <div id="services-grid" class="grid"></div>
 
     <script>
-        function showToast(msg, isError = false) {
-            const el = document.getElementById('toast');
-            el.innerText = msg;
-            el.style.display = 'block';
-            el.style.borderColor = isError ? '#ff4444' : '#00ff9d';
-            setTimeout(() => el.style.display = 'none', 3000);
-        }
+        const nodesGrid = document.getElementById('nodes-grid');
+        const servicesGrid = document.getElementById('services-grid');
 
-        function updateClock() {
-            document.getElementById('clock').innerText = new Date().toLocaleTimeString();
-        }
-        setInterval(updateClock, 1000);
+        fetch('/api/nodes').then(r => r.json()).then(renderNodes);
+        fetch('/api/status').then(r => r.json()).then(renderServices);
 
-        async function toggleAutoPilot(service, enabled) {
-            try {
-                await fetch('/api/toggle-autopilot', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ service, enabled })
-                });
-                showToast(`${service}: Auto-Pilot ${enabled ? 'ENABLED' : 'DISABLED'}`);
-            } catch (e) {
-                showToast("Failed to toggle Auto-Pilot", true);
-            }
-        }
+        const ws = new WebSocket(`ws://${window.location.host}/ws`);
+        ws.onmessage = (e) => {
+            const msg = JSON.parse(e.data);
+            if (msg.type === 'node_update') updateNode(msg.data);
+            if (msg.type === 'nodes_list_update') renderNodes(msg.data);
+            if (msg.type === 'services_update') renderServices(msg.data);
+        };
 
-        async function manualUpdate(service, btn) {
-            if (!confirm(`Force update and restart ${service}? This will cause momentary downtime.`)) return;
+        function renderNodes(nodes) { nodesGrid.innerHTML = nodes.map(n => createNodeCard(n)).join(''); }
+        function updateNode(node) { fetch('/api/nodes').then(r => r.json()).then(renderNodes); }
+
+        function createNodeCard(n) {
+            const isOnline = n.status === 'ONLINE';
+            const cpuColor = n.cpu_usage > 80 ? 'var(--danger)' : 'var(--accent)';
+            const ramPct = (n.ram_used / n.ram_total) * 100 || 0;
+            const gpuPct = n.gpu_usage;
+            const gpuMemPct = (n.gpu_mem_used / n.gpu_mem_total) * 100 || 0;
             
-            const originalText = btn.innerText;
-            btn.disabled = true;
-            btn.innerText = "UPDATING...";
-            
-            try {
-                const res = await fetch(`/api/update?service=${service}`, { method: 'POST' });
-                if (res.ok) {
-                    showToast(`${service} updated successfully!`);
-                } else {
-                    const txt = await res.text();
-                    showToast(`Error: ${txt}`, true);
-                }
-            } catch (e) {
-                showToast(`Network Error: ${e}`, true);
-            } finally {
-                btn.disabled = false;
-                btn.innerText = originalText;
-                fetchStatus(); // Refresh immediately
+            let gpuSection = '';
+            if (n.gpu_mem_total > 0) {
+                gpuSection = `
+                <div class="metric-label"><span>GPU LOAD</span> <span>${n.gpu_usage}%</span></div>
+                <div class="metric-bar"><div class="metric-fill" style="width:${gpuPct}%; background:var(--gpu)"></div></div>
+                <div class="metric-label"><span>GPU MEM</span> <span>${n.gpu_mem_used} / ${n.gpu_mem_total} MB</span></div>
+                <div class="metric-bar"><div class="metric-fill" style="width:${gpuMemPct}%; background:var(--gpu)"></div></div>`;
             }
+
+            return `
+            <div class="node-card ${isOnline ? '' : 'offline'}">
+                <div class="node-header">
+                    <span>${n.name}</span>
+                    <span style="color:${isOnline ? 'var(--accent)' : 'var(--danger)'}">${n.status}</span>
+                </div>
+                <div class="metric-label"><span>CPU</span> <span>${n.cpu_usage.toFixed(1)}%</span></div>
+                <div class="metric-bar"><div class="metric-fill" style="width:${n.cpu_usage}%; background:${cpuColor}"></div></div>
+                <div class="metric-label"><span>RAM</span> <span>${n.ram_used} / ${n.ram_total} MB</span></div>
+                <div class="metric-bar"><div class="metric-fill" style="width:${ramPct}%"></div></div>
+                ${gpuSection}
+            </div>`;
         }
 
-        async function fetchStatus() {
-            try {
-                const res = await fetch('/api/status');
-                const data = await res.json();
-                
-                const html = data.map(svc => {
-                    const isUp = svc.status.toLowerCase().includes("up");
-                    const shortImage = svc.image.split('/').pop().split(':')[0]; // Sadece image ismi
-                    
-                    return `
-                    <div class="card">
-                        <div class="card-header">
-                            <div>
-                                <div class="svc-name">${svc.name}</div>
-                                <div class="svc-image" title="${svc.image}">${shortImage}</div>
-                            </div>
-                            <span class="status-badge ${isUp ? 'up' : 'down'}">${isUp ? 'ONLINE' : 'OFFLINE'}</span>
-                        </div>
-                        
-                        <div class="meta-grid">
-                            <div class="meta-item">
-                                <b>IMAGE HASH</b>
-                                <span class="hash">${svc.short_id}</span>
-                            </div>
-                            <div class="meta-item">
-                                <b>LAST SYNC</b>
-                                <span>${svc.last_sync}</span>
-                            </div>
-                        </div>
-
-                        <div class="actions">
-                            <div class="toggle-container">
-                                <label class="switch">
-                                    <input type="checkbox" 
-                                        ${svc.auto_pilot ? 'checked' : ''} 
-                                        onchange="toggleAutoPilot('${svc.name}', this.checked)">
-                                    <span class="slider"></span>
-                                </label>
-                                <span>AUTO-PILOT</span>
-                            </div>
-                            <button onclick="manualUpdate('${svc.name}', this)">FORCE UPDATE</button>
-                        </div>
+        function renderServices(services) {
+            servicesGrid.innerHTML = services.map(s => {
+                const isUp = s.status.toLowerCase().includes("up");
+                return `
+                <div class="svc-card">
+                    <div class="svc-header">
+                        <span class="svc-name">${s.name}</span>
+                        <span class="status-dot ${isUp ? 'up' : ''}"></span>
                     </div>
-                    `;
-                }).join('');
-                
-                document.getElementById('app').innerHTML = html;
-            } catch (e) {
-                console.error(e);
-            }
+                    <div class="svc-meta">
+                        <span>${s.short_id}</span>
+                        <span>${s.image.split(':')[1] || 'latest'}</span>
+                    </div>
+                    <div class="actions">
+                         <button onclick="toggleAutoPilot('${s.name}', ${!s.auto_pilot})">${s.auto_pilot ? '🟢 AUTO' : '⚪ MANUAL'}</button>
+                         <button onclick="updateService('${s.name}')">UPDATE</button>
+                    </div>
+                </div>`;
+            }).join('');
         }
 
-        // Initial Load & Poll
-        fetchStatus();
-        setInterval(fetchStatus, 3000); // 3 saniyede bir yenile
+        async function updateService(name) {
+            if(!confirm("Update " + name + "?")) return;
+            await fetch(`/api/update?service=${name}`, {method: 'POST'});
+        }
+        
+        async function toggleAutoPilot(name, enabled) {
+            await fetch('/api/toggle-autopilot', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({service: name, enabled}) });
+            fetch('/api/status').then(r => r.json()).then(renderServices);
+        }
     </script>
 </body>
 </html>

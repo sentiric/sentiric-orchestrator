@@ -1,0 +1,22 @@
+syntax = "proto3";
+package sentiric.orchestrator.v1;
+
+service OrchestratorService {
+  rpc ReportNodeStatus(NodeStatus) returns (Ack);
+}
+
+message NodeStatus {
+  string node_name = 1;
+  float cpu_usage = 2;
+  uint64 ram_used = 3;
+  uint64 ram_total = 4;
+  float gpu_usage = 5;
+  uint64 gpu_mem_used = 6;
+  uint64 gpu_mem_total = 7;
+  string timestamp = 8;
+  string status = 9;
+}
+
+message Ack {
+  bool success = 1;
+}
