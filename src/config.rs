@@ -6,7 +6,7 @@ pub struct AppConfig {
     pub node_name: String,
     pub host: String,
     pub http_port: u16,
-    pub grpc_port: u16,
+    pub _grpc_port: u16, // Kullanılmıyordu, warning için _ eklendi
     pub docker_socket: String,
     pub poll_interval: u64,
     pub auto_pilot_services: Vec<String>,
@@ -27,12 +27,12 @@ impl AppConfig {
             ).to_uppercase(),
             host: env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string()),
             http_port: env::var("HTTP_PORT").unwrap_or("11080".to_string()).parse().unwrap_or(11080),
-            grpc_port: env::var("GRPC_PORT").unwrap_or("11081".to_string()).parse().unwrap_or(11081),
+            _grpc_port: env::var("GRPC_PORT").unwrap_or("11081".to_string()).parse().unwrap_or(11081),
             docker_socket: env::var("DOCKER_SOCKET").unwrap_or_else(|_| 
                 if cfg!(target_os = "windows") { "//./pipe/docker_engine".into() } 
                 else { "/var/run/docker.sock".into() }
             ),
-            poll_interval: env::var("POLL_INTERVAL").unwrap_or("60".to_string()).parse().unwrap_or(60),
+            poll_interval: env::var("POLL_INTERVAL").unwrap_or("30".to_string()).parse().unwrap_or(30),
             auto_pilot_services: ap_list,
         }
     }
