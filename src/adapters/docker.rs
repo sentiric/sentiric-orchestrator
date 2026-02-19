@@ -1,5 +1,6 @@
 use bollard::Docker;
-use bollard::container::{ListContainersOptions, StatsOptions, StopContainerOptions, RemoveContainerOptions, Config, CreateContainerOptions, StartContainerOptions};
+// UYARI DÜZELTME: Sadece kullanılanları import et
+use bollard::container::{StopContainerOptions, RemoveContainerOptions, Config, CreateContainerOptions, StartContainerOptions};
 use bollard::image::CreateImageOptions;
 use futures_util::StreamExt;
 use anyhow::Result;

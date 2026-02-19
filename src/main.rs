@@ -5,9 +5,9 @@ mod api;
 
 use std::{sync::Arc, collections::HashMap, time::Duration};
 use tokio::sync::{Mutex, broadcast};
-use tracing::{info, error};
-use bollard::container::{ListContainersOptions, StatsOptions};
-use futures_util::StreamExt;
+use tracing::info; // Error kullanılmıyordu, sildik
+use bollard::container::ListContainersOptions; // StatsOptions sildik
+// use futures_util::StreamExt; // Kullanılmıyorsa silebilirsin, ama Docker adapter içinde lazım olabilir. Main'de lazım değilse sil.
 
 use crate::config::AppConfig;
 use crate::adapters::docker::DockerAdapter;
@@ -28,7 +28,10 @@ async fn main() -> anyhow::Result<()> {
     let cfg = AppConfig::load();
     
     info!("💠 SENTIRIC NEXUS v5.0 Booting...");
-    info!("🔧 Node: {} | Host: {}", cfg.node_name, cfg.host);
+    // UYARI DÜZELTME: Config değişkenlerini kullanıyoruz
+    info!("🔧 Env: {} | Node: {} | Host: {}", cfg.env, cfg.node_name, cfg.host);
+    info!("🔧 Ports -> HTTP: {} | gRPC: {}", cfg.http_port, cfg.grpc_port);
+    info!("🔧 Poll Interval: {}s", cfg.poll_interval);
 
     // Channels
     let (tx, _) = broadcast::channel::<String>(100);
@@ -74,10 +77,9 @@ async fn main() -> anyhow::Result<()> {
                     let name = c.names.unwrap_or_default().first().cloned().unwrap_or_default().replace("/", "");
                     if name.is_empty() || name.contains("orchestrator") { continue; }
 
-                    // Quick Stats (CPU/Mem)
-                    let mut cpu = 0.0;
-                    let mut mem = 0;
-                    // Detaylı stats logic'i burada basitleştirildi, prod için optimize edilmeli
+                    // UYARI DÜZELTME: mut sildik
+                    let cpu = 0.0;
+                    let mem = 0;
                     
                     let svc = ServiceInstance {
                         name: name.clone(),
