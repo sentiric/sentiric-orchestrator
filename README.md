@@ -43,14 +43,45 @@ orchestrator-service:
   volumes:
     - /var/run/docker.sock:/var/run/docker.sock
   environment:
+      # --- Global ---
+    - ENV=production
+    - LOG_LEVEL=info
+    - LOG_FORMAT=json
     - RUST_LOG=info
-    - SERVICE_IGNORE=true
+    
+    # --- Network ---
+    - ORCHESTRTOR_SERVICE_IPV4_ADDRESS=10.88.11.8
     - ORCHESTRTOR_SERVICE_HTTP_PORT=11080
+    - ORCHESTRTOR_SERVICE_GRPC_PORT=11081
+    - ORCHESTRTOR_SERVICE_METRICS_PORT=11082
+    - ORCHESTRTOR_SERVICE_HOST=orchestrator-service
+        
+    # ---
+    # Bu servis hariç tutulacak mı? Hayır
+    - SERVICE_IGNORE=false
+    # Başka orchestratorlara stream akıt ( yada ana orchestrator'a)
+    # Boş ise sadece kendisi aktif
+    # - UPSTREAM_ORCHESTRATOR_URL=http://master-node-or-ip:11081
+    - UPSTREAM_ORCHESTRATOR_URL=
+    # Kontrol sıklığı (Saniye) - 30sn idealdir.
+    - POLL_INTERVAL=30   
+    # --- AUTO-PILOT CONFIG (Hardcode Yerine Buradan Yönetilecek) ---
+    # Virgülle ayrılmış servis listesi.
+    # proxy-service: Sık güncellenen kritik servis
+    # media-service: Sık güncellenen RTP servisi
+    # observer-service: Gözlemci
+    # Örnek
+    # - AUTO_PILOT_SERVICES=sbc-service,proxy-service,observer-service,media-service
+    # Boş ise her hangi bir auto piliot yok yada aktif değil
+    - AUTO_PILOT_SERVICES=
+
   networks:
     sentiric-net:
       ipv4_address: 10.88.11.8
   ports:
-    - "11080:11080"
+    - "11080:11080" # HTTP Port
+    - "11081:11081" # GRPC POrt
+    - "11082:11082" # Metric Port
   restart: always
 ```
 
