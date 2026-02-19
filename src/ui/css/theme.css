@@ -1,0 +1,44 @@
+:root {
+    --bg-base: #050505;
+    --bg-panel: #0d0d0d;
+    --border-color: #1f1f1f;
+    --text-main: #e0e0e0;
+    --text-muted: #666;
+
+    /* Nexus Identity Colors */
+    --color-primary: #bd00ff; /* Purple */
+    --color-accent: #00ffa3;  /* Neon Green */
+    --color-warn: #ffb800;
+    --color-error: #ff3333;
+    
+    --font-mono: 'JetBrains Mono', monospace;
+}
+
+* { box-sizing: border-box; }
+body { background: var(--bg-base); color: var(--text-main); font-family: 'Inter', sans-serif; margin: 0; padding: 0; overflow: hidden; }
+
+/* Grid Layout */
+.nexus-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 15px; padding: 20px; height: calc(100vh - 100px); overflow-y: auto; }
+
+/* Cards */
+.card { background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; transition: border 0.3s; }
+.card:hover { border-color: var(--color-primary); }
+
+.card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+.card-title { font-weight: 700; font-size: 14px; letter-spacing: 0.5px; }
+.gpu-badge { background: var(--color-primary); color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 4px; font-weight: bold; margin-left: 8px; }
+
+/* Progress Bars */
+.bar-container { margin-bottom: 10px; }
+.bar-label { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); margin-bottom: 3px; font-family: var(--font-mono); }
+.bar-track { height: 4px; background: #1a1a1a; border-radius: 2px; overflow: hidden; }
+.bar-fill { height: 100%; background: var(--color-accent); transition: width 0.5s ease; }
+.bar-fill.cpu { background: #00a8ff; }
+.bar-fill.ram { background: var(--color-accent); }
+.bar-fill.gpu { background: var(--color-primary); }
+
+/* Buttons */
+.btn-group { display: flex; gap: 10px; margin-top: 15px; border-top: 1px solid var(--border-color); padding-top: 10px; }
+button { flex: 1; background: transparent; border: 1px solid var(--border-color); color: var(--text-muted); padding: 6px; font-size: 10px; cursor: pointer; border-radius: 4px; font-family: var(--font-mono); transition: all 0.2s; }
+button:hover { color: #fff; border-color: #555; }
+button.btn-primary:hover { border-color: var(--color-accent); color: var(--color-accent); background: rgba(0, 255, 163, 0.05); }
