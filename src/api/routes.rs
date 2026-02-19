@@ -13,12 +13,10 @@ pub fn create_router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/", get(index_handler))
         .route("/ws", get(ws_handler))
-        // Statik dosyaları binary içinden sunuyoruz
         .route("/ui/css/theme.css", get(css_theme_handler))
-        .route("/ui/css/layout.css", get(css_layout_handler)) // Eğer layout.css varsa
+        .route("/ui/css/layout.css", get(css_layout_handler))
         .route("/ui/js/app.js", get(js_app_handler))
         .route("/ui/js/websocket.js", get(js_ws_handler))
-        // API
         .route("/api/status", get(status_handler))
         .route("/api/update", post(update_handler))
         .route("/api/toggle-autopilot", post(toggle_handler))
@@ -38,16 +36,12 @@ async fn css_theme_handler() -> impl IntoResponse {
     )
 }
 
-// Eğer layout.css oluşturmadıysan bu handler'ı ve route'u silebilirsin
-async fn css_layout_handler() -> Response {
-    // Dosya yoksa 404 dön veya boş string
-    // include_str! hata verirse burayı silebilirsin.
-    // Şimdilik boş dönüyorum hata vermemesi için
+async fn css_layout_handler() -> impl IntoResponse {
     (
-        StatusCode::OK,
         [(header::CONTENT_TYPE, "text/css")],
+        // layout.css boş olsa bile hata vermemesi için string döndürüyoruz
         "", 
-    ).into_response()
+    )
 }
 
 // JS Handlers
@@ -65,7 +59,6 @@ async fn js_ws_handler() -> impl IntoResponse {
     )
 }
 
-// ... (Geri kalan ws_handler, handle_socket, status_handler vb. AYNI KALACAK)
 async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> impl IntoResponse {
     ws.on_upgrade(|socket| handle_socket(socket, state))
 }
@@ -82,8 +75,9 @@ async fn status_handler(State(state): State<Arc<AppState>>) -> Json<Vec<crate::c
     Json(services.values().cloned().collect())
 }
 
-async fn update_handler(State(state): State<Arc<AppState>>, Query(p): Query<ActionParams>) -> impl IntoResponse {
-    match state.docker.update_service(&p.service).await {
+// FIX: force_update_service olarak güncellendi ve dönüş tipleri açıkça belirtildi
+async fn update_handler(State(state): State<Arc<AppState>>, Query(p): Query<ActionParams>) -> Response {
+    match state.docker.force_update_service(&p.service).await {
         Ok(msg) => (StatusCode::OK, msg).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }

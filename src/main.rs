@@ -57,13 +57,21 @@ async fn main() -> anyhow::Result<()> {
     // 2. DOCKER SCAN & AUTO-PILOT LOOP
     let scan_state = state.clone();
     let scan_node = cfg.node_name.clone();
-    let poll_interval = cfg.poll_interval;
+    let poll_interval = cfg.poll_interval; // 30sn
 
     tokio::spawn(async move {
         let client = scan_state.docker.get_client();
         info!("🕵️ Service Scanner Loop Started (Interval: {}s)", poll_interval);
         
+        // Auto-Pilot için ayrı bir sayaç tutalım, her taramada değil, X taramada bir update kontrolü yapsın (Rate Limit)
+        let mut tick_count = 0;
+        let check_every_n_ticks = 2; // 30sn * 2 = 60 saniyede bir registry kontrolü
+
         loop {
+            tick_count += 1;
+            let do_update_check = tick_count >= check_every_n_ticks;
+            if do_update_check { tick_count = 0; }
+
             match client.list_containers(Some(ListContainersOptions::<String> { all: true, ..Default::default() })).await {
                 Ok(containers) => {
                     let ap_guard = scan_state.auto_pilot_config.lock().await;
@@ -76,22 +84,24 @@ async fn main() -> anyhow::Result<()> {
 
                         let is_orchestrator = name.contains("orchestrator");
                         let is_auto_pilot = *ap_guard.get(&name).unwrap_or(&false);
-
-                        // Auto-Pilot Mantığı
-                        if is_auto_pilot {
-                            if is_orchestrator {
-                                debug!("ℹ️ Skipping self-update for: {}", name);
-                            } else {
-                                // Burada normalde digest kontrolü yapılır. 
-                                // Şimdilik log basıyoruz ki çalıştığını görelim.
-                                debug!("🔍 Auto-Pilot Checking: {}", name);
-                                
-                                // NOT: Her döngüde güncelleme YAPMAZ. 
-                                // Gerçek bir digest kontrolü eklenene kadar burası sadece izleme modunda.
-                                // Kullanıcı UI'dan "Force Update" yapabilir.
-                            }
+                        
+                        // --- AUTO PILOT LOGIC ---
+                        if is_auto_pilot && do_update_check && !is_orchestrator {
+                            let docker_adapter = &scan_state.docker;
+                            let svc_name = name.clone();
+                            
+                            // Asenkron olarak update kontrolünü başlat (Main loop'u bloklama)
+                            let d_adapter = docker_adapter.clone();
+                            tokio::spawn(async move {
+                                match d_adapter.check_and_update_service(&svc_name).await {
+                                    Ok(updated) => if updated { info!("♻️ Auto-Pilot Action Completed: {}", svc_name) },
+                                    Err(e) => error!("⚠️ Auto-Pilot Failed ({}): {}", svc_name, e),
+                                }
+                            });
                         }
+                        // ------------------------
 
+                        // İstatistikleri (Domain.rs) güncelle
                         let svc = ServiceInstance {
                             name: name.clone(),
                             image: c.image.unwrap_or_default(),
@@ -99,9 +109,9 @@ async fn main() -> anyhow::Result<()> {
                             short_id: c.id.unwrap_or_default().chars().take(12).collect(),
                             auto_pilot: is_auto_pilot,
                             node: scan_node.clone(),
-                            cpu_usage: 0.0,
+                            cpu_usage: 0.0, // Metrics endpoint'ten alınmalı (Phase 2)
                             mem_usage: 0,
-                            has_gpu: name.contains("llm") || name.contains("ocr"),
+                            has_gpu: name.contains("llm") || name.contains("ocr") || name.contains("media"),
                         };
                         
                         cache.insert(name, svc.clone());
