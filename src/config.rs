@@ -10,7 +10,7 @@ pub struct AppConfig {
     pub docker_socket: String,
     pub poll_interval: u64,
     pub auto_pilot_services: Vec<String>,
-    pub upstream_url: Option<String>, // YENİ
+    pub upstream_url: Option<String>,
 }
 
 impl AppConfig {
@@ -20,7 +20,7 @@ impl AppConfig {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
-                        
+            
         let upstream = env::var("UPSTREAM_ORCHESTRATOR_URL").ok()
             .filter(|s| !s.trim().is_empty());
 

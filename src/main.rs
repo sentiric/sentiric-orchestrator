@@ -7,14 +7,13 @@ use std::{sync::Arc, collections::HashMap, time::Duration};
 use tokio::sync::{Mutex, broadcast};
 use tracing::{info, error, warn}; 
 use bollard::container::ListContainersOptions;
-use reqwest::Client; // YENİ: Upstream için
+use reqwest::Client;
 
 use crate::config::AppConfig;
 use crate::adapters::docker::DockerAdapter;
 use crate::adapters::system::SystemMonitor;
-use crate::core::domain::{ServiceInstance, NodeStats};
+use crate::core::domain::{ServiceInstance, NodeStats, ClusterReport};
 
-// CPU Delta Hesaplama Cache
 struct CpuStatsCache {
     cpu_usage: u64,
     system_usage: u64,
@@ -24,7 +23,8 @@ pub struct AppState {
     pub docker: DockerAdapter,
     pub auto_pilot_config: Mutex<HashMap<String, bool>>,
     pub services_cache: Mutex<HashMap<String, ServiceInstance>>,
-    pub node_stats_cache: Mutex<NodeStats>, // YENİ: Stats'ı tutmak için (Upstream'e göndereceğiz)
+    pub node_stats_cache: Mutex<NodeStats>,
+    pub cluster_cache: Mutex<HashMap<String, ClusterReport>>, 
     pub tx: Arc<broadcast::Sender<String>>,
 }
 
@@ -33,8 +33,8 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
     let cfg = AppConfig::load();
     
-    info!("💠 SENTIRIC ORCHESTRATOR v5.3 (Upstream & AI) Booting...");
-    info!("🔧 Node: {} | Upstream: {:?}", cfg.node_name, cfg.upstream_url);
+    info!("💠 SENTIRIC ORCHESTRATOR v5.4 (HIVE MIND) Booting...");
+    info!("🔧 Node: {} | Mode: {}", cfg.node_name, if cfg.upstream_url.is_some() { "EDGE" } else { "MASTER" });
 
     let (tx, _) = broadcast::channel::<String>(100);
     let tx = Arc::new(tx);
@@ -50,38 +50,50 @@ async fn main() -> anyhow::Result<()> {
         auto_pilot_config: Mutex::new(initial_ap),
         services_cache: Mutex::new(HashMap::new()),
         node_stats_cache: Mutex::new(NodeStats::default()),
+        cluster_cache: Mutex::new(HashMap::new()),
         tx: tx.clone(),
     });
 
-    // 1. SYSTEM MONITOR (Host Stats)
+    // 1. SYSTEM MONITOR
     let mon_state = state.clone();
+    let mon_node = cfg.node_name.clone();
     let mon_tx = tx.clone();
+    
     tokio::spawn(async move {
         loop {
             let stats = sys_mon.snapshot();
-            
-            // Cache güncelle (Upstream için)
             let mut node_cache = mon_state.node_stats_cache.lock().await;
             *node_cache = stats.clone();
             drop(node_cache);
 
-            // UI'a gönder
-            let _ = mon_tx.send(serde_json::json!({ "type": "node_update", "data": stats }).to_string());
+            // Local veriyi cluster cache'e ekle
+            let svcs = mon_state.services_cache.lock().await.values().cloned().collect();
+            let report = ClusterReport {
+                node: mon_node.clone(),
+                stats: stats,
+                services: svcs,
+                timestamp: chrono::Utc::now().to_rfc3339(),
+            };
+            
+            mon_state.cluster_cache.lock().await.insert(mon_node.clone(), report);
+            
+            // Cluster update gönder
+            let cluster_map = mon_state.cluster_cache.lock().await.clone();
+            let _ = mon_tx.send(serde_json::json!({ "type": "cluster_update", "data": cluster_map }).to_string());
+            
             tokio::time::sleep(Duration::from_secs(3)).await;
         }
     });
 
-    // 2. DOCKER SCAN & METRICS & AUTO-PILOT LOOP
+    // 2. DOCKER SCAN
     let scan_state = state.clone();
     let scan_node = cfg.node_name.clone();
     let poll_interval = cfg.poll_interval;
 
     tokio::spawn(async move {
         let client = scan_state.docker.get_client();
-        info!("🕵️ Service Scanner & Telemetry Engine Started (Interval: {}s)", poll_interval);
-        
         let mut tick_count = 0;
-        let update_check_ticks = 12; // 60sn
+        let update_check_ticks = 12; 
         let mut cpu_cache: HashMap<String, CpuStatsCache> = HashMap::new();
 
         loop {
@@ -99,34 +111,27 @@ async fn main() -> anyhow::Result<()> {
                         let name = c.names.unwrap_or_default().first().cloned().unwrap_or_default().replace("/", "");
                         if name.is_empty() { continue; }
 
-                        // DÜZELTME: Başına _ eklendi
                         let _is_orchestrator = name.contains("orchestrator");
                         let is_auto_pilot = *ap_guard.get(&name).unwrap_or(&false);
                         let container_id = c.id.clone().unwrap_or_default();
                         
-                        // Telemetry
                         let mut cpu_percent = 0.0;
                         let mut mem_usage_mb = 0;
 
                         if c.status.clone().unwrap_or_default().to_lowercase().contains("up") {
                             match scan_state.docker.get_container_stats(&container_id).await {
                                 Ok(stats) => {
-                                    // RAM
                                     let mem = &stats.memory_stats;
                                     mem_usage_mb = mem.usage.unwrap_or(0) / 1024 / 1024;
-
-                                    // CPU
                                     let cpu = &stats.cpu_stats;
                                     let pre_cpu = &stats.precpu_stats;
                                     let cpu_total = cpu.cpu_usage.total_usage;
                                     let system_total = cpu.system_cpu_usage.unwrap_or(0);
-                                    
                                     let (prev_cpu_total, prev_system_total) = if let Some(cached) = cpu_cache.get(&container_id) {
                                         (cached.cpu_usage, cached.system_usage)
                                     } else {
                                         (pre_cpu.cpu_usage.total_usage, pre_cpu.system_cpu_usage.unwrap_or(0))
                                     };
-
                                     if system_total > prev_system_total && cpu_total > prev_cpu_total {
                                         let cpu_delta = (cpu_total - prev_cpu_total) as f64;
                                         let system_delta = (system_total - prev_system_total) as f64;
@@ -141,16 +146,12 @@ async fn main() -> anyhow::Result<()> {
                             cpu_cache.remove(&container_id);
                         }
 
-                        // Auto-Pilot Update
                         if is_auto_pilot && do_update_check {
                             let docker_adapter = &scan_state.docker;
                             let svc_name = name.clone();
                             let d_adapter = docker_adapter.clone();
                             tokio::spawn(async move {
-                                match d_adapter.check_and_update_service(&svc_name).await {
-                                    Ok(updated) => if updated { info!("♻️ Auto-Pilot Action Completed: {}", svc_name) },
-                                    Err(e) => error!("⚠️ Auto-Pilot Failed ({}): {}", svc_name, e),
-                                }
+                                let _ = d_adapter.check_and_update_service(&svc_name).await;
                             });
                         }
 
@@ -169,54 +170,39 @@ async fn main() -> anyhow::Result<()> {
                         cache.insert(name, svc.clone());
                         list.push(svc);
                     }
-                    
-                    let _ = scan_state.tx.send(serde_json::json!({ "type": "services_update", "data": list }).to_string());
                 }
-                Err(e) => { error!("⚠️ Docker Daemon Hatası: {}", e); }
+                Err(e) => { error!("⚠️ Docker Hatası: {}", e); }
             }
             tokio::time::sleep(Duration::from_secs(poll_interval)).await;
         }
     });
 
-    // 4. UPSTREAM SYNC LOOP (YENİ: Ana Merkeze Veri Akışı)
+    // 3. UPSTREAM LOOP
     if let Some(upstream_url) = cfg.upstream_url {
         let up_state = state.clone();
         let http_client = Client::new();
         let node_name = cfg.node_name.clone();
 
-        info!("📡 Upstream Uplink Activated: Target -> {}", upstream_url);
-
         tokio::spawn(async move {
             loop {
-                // Verileri Topla
                 let svcs: Vec<ServiceInstance> = up_state.services_cache.lock().await.values().cloned().collect();
                 let stats: NodeStats = up_state.node_stats_cache.lock().await.clone();
+                let payload = ClusterReport {
+                    node: node_name.clone(),
+                    stats: stats,
+                    services: svcs,
+                    timestamp: chrono::Utc::now().to_rfc3339()
+                };
 
-                let payload = serde_json::json!({
-                    "node": node_name,
-                    "stats": stats,
-                    "services": svcs,
-                    "timestamp": chrono::Utc::now().to_rfc3339()
-                });
-
-                // Gönder
                 match http_client.post(&upstream_url).json(&payload).send().await {
-                    Ok(resp) => {
-                        if !resp.status().is_success() {
-                            warn!("⚠️ Upstream rejected data: {}", resp.status());
-                        }
-                    },
-                    Err(e) => {
-                        warn!("⚠️ Upstream Connection Failed: {}", e);
-                    }
+                    Ok(resp) => { if !resp.status().is_success() { warn!("Upstream error: {}", resp.status()); } },
+                    Err(e) => { warn!("Upstream unreachable: {}", e); }
                 }
-
-                tokio::time::sleep(Duration::from_secs(10)).await; // 10 saniyede bir raporla
+                tokio::time::sleep(Duration::from_secs(10)).await;
             }
         });
     }
 
-    // 5. API SERVER
     let app = api::routes::create_router(state.clone());
     let addr = format!("{}:{}", cfg.host, cfg.http_port);
     let listener = tokio::net::TcpListener::bind(addr).await?;

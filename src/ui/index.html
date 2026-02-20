@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SENTIRIC | NEXUS v5.3</title>
+    <title>SENTIRIC | NEXUS v5.4</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💠</text></svg>">
     <link rel="stylesheet" href="/ui/css/theme.css">
     <link rel="stylesheet" href="/ui/css/layout.css">
@@ -19,33 +19,31 @@
             </div>
 
             <div class="host-panel">
-                <div class="panel-header">HOST NODE</div>
-                <div class="node-name" id="host-name">CONNECTING...</div>
+                <div class="panel-header">CLUSTER NODES</div>
                 
-                <div class="stat-row">
-                    <div class="stat-label"><span>CPU LOAD</span><span id="host-cpu-val">0%</span></div>
-                    <div class="progress-track"><div class="progress-fill cpu" id="host-cpu-bar" style="width: 0%"></div></div>
+                <!-- LISTE BURAYA GELECEK -->
+                <div id="cluster-list"></div>
+
+                <!-- SELECTED NODE DETAIL -->
+                <div style="padding-top: 15px; border-top: 1px solid #222; margin-top: auto;">
+                    <div class="node-name" id="host-name">LOADING...</div>
+                    <div class="stat-row">
+                        <div class="stat-label"><span>CPU</span><span id="host-cpu-val">--</span></div>
+                        <div class="progress-track"><div class="progress-fill cpu" id="host-cpu-bar" style="width: 0%"></div></div>
+                    </div>
+                    <div class="stat-row">
+                        <div class="stat-label"><span>RAM</span><span id="host-ram-val">--</span></div>
+                        <div class="progress-track"><div class="progress-fill ram" id="host-ram-bar" style="width: 0%"></div></div>
+                    </div>
+                    <div class="stat-row" id="host-gpu-row" style="opacity: 0.5">
+                        <div class="stat-label"><span>GPU</span><span id="host-gpu-val">N/A</span></div>
+                        <div class="progress-track"><div class="progress-fill gpu" id="host-gpu-bar" style="width: 0%"></div></div>
+                    </div>
                 </div>
 
-                <div class="stat-row">
-                    <div class="stat-label"><span>RAM USAGE</span><span id="host-ram-val">0/0 GB</span></div>
-                    <div class="progress-track"><div class="progress-fill ram" id="host-ram-bar" style="width: 0%"></div></div>
-                </div>
-
-                <div class="stat-row" id="host-gpu-row" style="opacity: 0.5">
-                    <div class="stat-label"><span>GPU COMPUTE</span><span id="host-gpu-val">N/A</span></div>
-                    <div class="progress-track"><div class="progress-fill gpu" id="host-gpu-bar" style="width: 0%"></div></div>
-                </div>
-
-                <div class="panel-footer">
-                    <div>UPTIME: <span id="host-uptime" style="color: #fff">--</span></div>
-                    <div style="font-size: 9px; margin-top:5px; color:#444">SENTIRIC CLUSTER PROTOCOL v5.3</div>
-                </div>
-
-                <!-- NEW ACTION BUTTONS -->
-                <div class="sidebar-actions" style="margin-top: 20px; border-top: 1px solid #222; padding-top: 20px; display: flex; flex-direction: column; gap: 10px;">
+                <div class="sidebar-actions" style="margin-top: 10px; display:flex; flex-direction:column; gap:5px;">
                     <button id="btn-export" class="btn-primary" style="width: 100%;">🤖 AI EXPORT</button>
-                    <button id="btn-prune" class="btn-danger" style="width: 100%;">♻️ SYSTEM PRUNE</button>
+                    <button id="btn-prune" class="btn-danger" style="width: 100%;">♻️ PRUNE (LOCAL)</button>
                 </div>
             </div>
         </aside>
@@ -53,14 +51,14 @@
         <!-- MAIN -->
         <main class="main-content">
             <header class="top-bar">
-                <div class="breadcrumbs">CLUSTER / <span style="color:var(--color-accent)">ACTIVE NODES</span></div>
+                <div class="breadcrumbs">CLUSTER / <span style="color:var(--color-accent)" id="active-view-node">ALL NODES</span></div>
                 <div class="global-actions">
                     <div class="connection-status" id="conn-status">● DISCONNECTED</div>
                 </div>
             </header>
 
             <div id="services-grid" class="nexus-grid">
-                <div class="empty-state">Waiting for telemetry stream...</div>
+                <div class="empty-state">Waiting for cluster data...</div>
             </div>
         </main>
     </div>

@@ -86,13 +86,11 @@ impl DockerAdapter {
             .map_err(|e| anyhow::anyhow!("Inspect error: {}", e))
     }
 
-    // THE JANITOR (PRUNE) - DÜZELTME BURADA
+    // THE JANITOR (Generic Fix Applied Here)
     pub async fn prune_system(&self) -> Result<String> {
-        // DÜZELTME: Generic tip olarak <String> belirtildi
         let c_prune = self.client.prune_containers(None::<PruneContainersOptions<String>>).await?;
         let c_deleted = c_prune.containers_deleted.unwrap_or_default().len();
 
-        // DÜZELTME: Generic tip olarak <String> belirtildi
         let i_prune = self.client.prune_images(None::<PruneImagesOptions<String>>).await?;
         let i_deleted = i_prune.images_deleted.unwrap_or_default().len();
         let space = i_prune.space_reclaimed.unwrap_or(0);
