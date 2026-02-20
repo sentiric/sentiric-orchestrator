@@ -5,13 +5,14 @@ mod api;
 
 use std::{sync::Arc, collections::HashMap, time::Duration};
 use tokio::sync::{Mutex, broadcast};
-use tracing::{info, error, debug}; // Debug eklendi
+use tracing::{info, error}; // debug kaldırıldı
 use bollard::container::ListContainersOptions;
 
 use crate::config::AppConfig;
 use crate::adapters::docker::DockerAdapter;
 use crate::adapters::system::SystemMonitor;
 use crate::core::domain::ServiceInstance;
+
 
 pub struct AppState {
     pub docker: DockerAdapter,
@@ -63,9 +64,8 @@ async fn main() -> anyhow::Result<()> {
         let client = scan_state.docker.get_client();
         info!("🕵️ Service Scanner Loop Started (Interval: {}s)", poll_interval);
         
-        // Auto-Pilot için ayrı bir sayaç tutalım, her taramada değil, X taramada bir update kontrolü yapsın (Rate Limit)
         let mut tick_count = 0;
-        let check_every_n_ticks = 2; // 30sn * 2 = 60 saniyede bir registry kontrolü
+        let check_every_n_ticks = 2;
 
         loop {
             tick_count += 1;
@@ -85,12 +85,10 @@ async fn main() -> anyhow::Result<()> {
                         let is_orchestrator = name.contains("orchestrator");
                         let is_auto_pilot = *ap_guard.get(&name).unwrap_or(&false);
                         
-                        // --- AUTO PILOT LOGIC ---
                         if is_auto_pilot && do_update_check && !is_orchestrator {
                             let docker_adapter = &scan_state.docker;
                             let svc_name = name.clone();
                             
-                            // Asenkron olarak update kontrolünü başlat (Main loop'u bloklama)
                             let d_adapter = docker_adapter.clone();
                             tokio::spawn(async move {
                                 match d_adapter.check_and_update_service(&svc_name).await {
@@ -99,9 +97,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             });
                         }
-                        // ------------------------
 
-                        // İstatistikleri (Domain.rs) güncelle
                         let svc = ServiceInstance {
                             name: name.clone(),
                             image: c.image.unwrap_or_default(),
@@ -109,7 +105,7 @@ async fn main() -> anyhow::Result<()> {
                             short_id: c.id.unwrap_or_default().chars().take(12).collect(),
                             auto_pilot: is_auto_pilot,
                             node: scan_node.clone(),
-                            cpu_usage: 0.0, // Metrics endpoint'ten alınmalı (Phase 2)
+                            cpu_usage: 0.0,
                             mem_usage: 0,
                             has_gpu: name.contains("llm") || name.contains("ocr") || name.contains("media"),
                         };

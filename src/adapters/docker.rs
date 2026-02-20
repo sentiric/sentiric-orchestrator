@@ -1,9 +1,10 @@
 use bollard::Docker;
-use bollard::container::{StopContainerOptions, RemoveContainerOptions, Config, CreateContainerOptions, StartContainerOptions, InspectContainerOptions};
+use bollard::container::{StopContainerOptions, RemoveContainerOptions, Config, CreateContainerOptions, StartContainerOptions, InspectContainerOptions, RestartContainerOptions, LogsOptions, LogOutput}; // LogOutput eklendi
 use bollard::image::CreateImageOptions;
-use futures_util::StreamExt;
+use futures_util::{StreamExt, Stream};
 use anyhow::Result;
-use tracing::{info, error, debug}; // warn kaldırıldı, unused uyarısı için
+use tracing::{info, error, debug};
+use std::default::Default;
 
 #[derive(Clone)]
 pub struct DockerAdapter {
@@ -23,6 +24,39 @@ impl DockerAdapter {
     pub fn get_client(&self) -> Docker {
         self.client.clone()
     }
+    
+    // YENİ: Servisi Başlat
+    pub async fn start_service(&self, svc_id: &str) -> Result<()> {
+        info!("▶️ Starting: {}", svc_id);
+        self.client.start_container(svc_id, None::<StartContainerOptions<String>>).await?;
+        Ok(())
+    }
+
+    // YENİ: Servisi Durdur
+    pub async fn stop_service(&self, svc_id: &str) -> Result<()> {
+        info!("🛑 Stopping: {}", svc_id);
+        self.client.stop_container(svc_id, Some(StopContainerOptions { t: 10 })).await?;
+        Ok(())
+    }
+    
+    // YENİ: Servisi Yeniden Başlat
+    pub async fn restart_service(&self, svc_id: &str) -> Result<()> {
+        info!("🔄 Restarting: {}", svc_id);
+        self.client.restart_container(svc_id, Some(RestartContainerOptions { t: 10 })).await?;
+        Ok(())
+    }
+    
+    // YENİ & DÜZELTİLDİ: Log Akışı (Stream)
+    pub fn get_log_stream(&self, svc_id: &str) -> impl Stream<Item = Result<LogOutput, bollard::errors::Error>> {
+        let options = Some(LogsOptions::<String>{
+            follow: true,
+            stdout: true,
+            stderr: true,
+            tail: "100".to_string(), // Son 100 satırı göster
+            ..Default::default()
+        });
+        self.client.logs(svc_id, options)
+    }
 
     /// Servisi güncelle (Atomic: Pull -> Compare -> (Stop -> Remove -> Create -> Start))
     /// Return: true (güncellendi), false (değişiklik yok), Err (hata)
@@ -33,20 +67,15 @@ impl DockerAdapter {
         let inspect = docker.inspect_container(svc_name, None::<InspectContainerOptions>).await
             .map_err(|e| anyhow::anyhow!("Servis bulunamadı: {}", e))?;
         
-        // FIX: Option<String> -> String dönüşümü yapıldı
         let current_image_id = inspect.image.clone().unwrap_or_default();
         
         let image_name = inspect.config.as_ref().and_then(|c| c.image.clone())
             .ok_or_else(|| anyhow::anyhow!("Imaj tanımı yok"))?;
 
-        // Orchestrator kendini güncellerse döngüye girer, bunu engelle
-        if svc_name.contains("orchestrator") {
-            return Ok(false);
-        }
+        if svc_name.contains("orchestrator") { return Ok(false); }
 
         debug!("🔍 [{}] Checking for updates on image: {}", svc_name, image_name);
 
-        // 2. Yeni Imajı Çek (Pull)
         let mut stream = docker.create_image(Some(CreateImageOptions { 
             from_image: image_name.clone(), ..Default::default() 
         }), None, None);
@@ -58,30 +87,22 @@ impl DockerAdapter {
             }
         }
 
-        // 3. Imaj ID Kontrolü (Inspect Image)
         let new_image_inspect = docker.inspect_image(&image_name).await
             .map_err(|e| anyhow::anyhow!("Imaj inspect hatası: {}", e))?;
         
-        // FIX: Option<String> -> String dönüşümü
         let new_image_id = new_image_inspect.id.clone().unwrap_or_default();
 
-        // String karşılaştırması artık güvenli
         if current_image_id == new_image_id {
-            // Loglarken slice almadan önce uzunluk kontrolü yapmak güvenlidir ama Docker ID'leri uzundur.
-            // Yine de güvenli slice alalım.
             let c_short = if current_image_id.len() > 12 { &current_image_id[..12] } else { &current_image_id };
             debug!("✅ [{}] Zaten güncel. (ID: {})", svc_name, c_short);
             return Ok(false);
         }
 
-        // Güvenli slice alımı
         let c_short = if current_image_id.len() > 12 { &current_image_id[..12] } else { &current_image_id };
         let n_short = if new_image_id.len() > 12 { &new_image_id[..12] } else { &new_image_id };
 
         info!("🚀 [{}] GÜNCELLEME TESPİT EDİLDİ! Eski: {} -> Yeni: {}", svc_name, c_short, n_short);
 
-        // 4. Update Sequence
-        // Config Preservation
         let config = Config {
             image: Some(image_name.clone()),
             env: inspect.config.as_ref().and_then(|c| c.env.clone()),
@@ -109,7 +130,6 @@ impl DockerAdapter {
         Ok(true)
     }
 
-    // Manual Force Update (API için)
     pub async fn force_update_service(&self, svc_name: &str) -> Result<String> {
         match self.check_and_update_service(svc_name).await {
             Ok(updated) => Ok(if updated { "Güncellendi.".into() } else { "Zaten güncel, yeniden başlatıldı.".into() }),

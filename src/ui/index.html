@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>SENTIRIC | NEXUS v5.0</title>
+    <title>SENTIRIC | NEXUS v5.1</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💠</text></svg>">
     <link rel="stylesheet" href="/ui/css/theme.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=JetBrains+Mono&display=swap" rel="stylesheet">
@@ -11,7 +11,7 @@
     <div id="app">
         <!-- HEADER -->
         <header style="padding: 15px 20px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; background: var(--bg-panel);">
-            <div style="font-weight: 800; font-size: 16px;">SENTIRIC <span style="color: var(--color-primary);">NEXUS</span> <span style="font-size:10px; opacity:0.5;">v5.0</span></div>
+            <div style="font-weight: 800; font-size: 16px;">SENTIRIC <span style="color: var(--color-primary);">NEXUS</span> <span style="font-size:10px; opacity:0.5;">v5.1</span></div>
             <div style="display: flex; gap: 20px; font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);">
                 <span>NODE: <b id="node-name" style="color: #fff">...</b></span>
                 <span>STATUS: <b id="status-indicator" style="color: var(--color-accent)">ONLINE</b></span>
@@ -20,8 +20,18 @@
 
         <!-- MAIN GRID -->
         <div id="services-grid" class="nexus-grid">
-            <!-- Cards will be injected here via JS -->
             <div style="color: #444; text-align: center; grid-column: 1/-1; padding-top: 50px;">Waiting for telemetry...</div>
+        </div>
+    </div>
+    
+    <!-- YENİ: LOG MODAL -->
+    <div id="log-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span id="log-modal-title">Logs</span>
+                <button id="log-modal-close" class="modal-close-btn">&times;</button>
+            </div>
+            <div id="log-output" class="log-container"></div>
         </div>
     </div>
 
