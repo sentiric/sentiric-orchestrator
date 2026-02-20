@@ -75,7 +75,7 @@ Sentiric Anayasası gereği port dağılımı şöyledir:
       # Bu node'un rapor göndereceği Ana Merkez (Master Orchestrator)
       # Boş bırakılırsa "Standalone" modda çalışır.
       # Format: HTTP Post URL'i
-      - UPSTREAM_ORCHESTRATOR_URL=http://master-node-ip:11080/api/ingest/node-report
+      - UPSTREAM_ORCHESTRATOR_URL=http://master-node-ip:11080/api/ingest/report
       
     restart: always
 ```
