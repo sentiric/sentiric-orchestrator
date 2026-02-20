@@ -1,9 +1,9 @@
 use bollard::Docker;
-use bollard::container::{StopContainerOptions, RemoveContainerOptions, Config, CreateContainerOptions, StartContainerOptions, InspectContainerOptions, RestartContainerOptions, LogsOptions, LogOutput}; // LogOutput eklendi
+use bollard::container::{StopContainerOptions, RemoveContainerOptions, Config, CreateContainerOptions, StartContainerOptions, InspectContainerOptions, RestartContainerOptions, LogsOptions, LogOutput, Stats, StatsOptions};
 use bollard::image::CreateImageOptions;
 use futures_util::{StreamExt, Stream};
 use anyhow::Result;
-use tracing::{info, error, debug};
+use tracing::{info, error, debug, warn}; // warn eklendi
 use std::default::Default;
 
 #[derive(Clone)]
@@ -25,54 +25,62 @@ impl DockerAdapter {
         self.client.clone()
     }
     
-    // YENİ: Servisi Başlat
+    // --- LIFECYCLE METHODS ---
     pub async fn start_service(&self, svc_id: &str) -> Result<()> {
         info!("▶️ Starting: {}", svc_id);
         self.client.start_container(svc_id, None::<StartContainerOptions<String>>).await?;
         Ok(())
     }
 
-    // YENİ: Servisi Durdur
     pub async fn stop_service(&self, svc_id: &str) -> Result<()> {
         info!("🛑 Stopping: {}", svc_id);
         self.client.stop_container(svc_id, Some(StopContainerOptions { t: 10 })).await?;
         Ok(())
     }
     
-    // YENİ: Servisi Yeniden Başlat
     pub async fn restart_service(&self, svc_id: &str) -> Result<()> {
         info!("🔄 Restarting: {}", svc_id);
         self.client.restart_container(svc_id, Some(RestartContainerOptions { t: 10 })).await?;
         Ok(())
     }
     
-    // YENİ & DÜZELTİLDİ: Log Akışı (Stream)
     pub fn get_log_stream(&self, svc_id: &str) -> impl Stream<Item = Result<LogOutput, bollard::errors::Error>> {
         let options = Some(LogsOptions::<String>{
             follow: true,
             stdout: true,
             stderr: true,
-            tail: "100".to_string(), // Son 100 satırı göster
+            tail: "200".to_string(),
             ..Default::default()
         });
         self.client.logs(svc_id, options)
     }
 
-    /// Servisi güncelle (Atomic: Pull -> Compare -> (Stop -> Remove -> Create -> Start))
-    /// Return: true (güncellendi), false (değişiklik yok), Err (hata)
+    // YENİ: Anlık Stat Çekme (Tek seferlik snapshot)
+    pub async fn get_container_stats(&self, svc_id: &str) -> Result<Stats> {
+        let options = Some(StatsOptions { stream: false, one_shot: true });
+        let mut stream = self.client.stats(svc_id, options);
+        
+        if let Some(result) = stream.next().await {
+            return result.map_err(|e| anyhow::anyhow!("Stats error: {}", e));
+        }
+        Err(anyhow::anyhow!("No stats received"))
+    }
+
+    // --- UPDATE ENGINE ---
     pub async fn check_and_update_service(&self, svc_name: &str) -> Result<bool> {
         let docker = &self.client;
 
-        // 1. Mevcut Konteyneri İncele
         let inspect = docker.inspect_container(svc_name, None::<InspectContainerOptions>).await
             .map_err(|e| anyhow::anyhow!("Servis bulunamadı: {}", e))?;
         
         let current_image_id = inspect.image.clone().unwrap_or_default();
-        
         let image_name = inspect.config.as_ref().and_then(|c| c.image.clone())
             .ok_or_else(|| anyhow::anyhow!("Imaj tanımı yok"))?;
 
-        if svc_name.contains("orchestrator") { return Ok(false); }
+        // DÜZELTME: Self-Update Kilidi Kaldırıldı. Sadece uyarı veriyoruz.
+        if svc_name.contains("orchestrator") {
+            warn!("⚠️ SELF-UPDATE DETECTED: Orchestrator is updating itself. Connection will be lost briefly.");
+        }
 
         debug!("🔍 [{}] Checking for updates on image: {}", svc_name, image_name);
 
@@ -93,15 +101,12 @@ impl DockerAdapter {
         let new_image_id = new_image_inspect.id.clone().unwrap_or_default();
 
         if current_image_id == new_image_id {
-            let c_short = if current_image_id.len() > 12 { &current_image_id[..12] } else { &current_image_id };
-            debug!("✅ [{}] Zaten güncel. (ID: {})", svc_name, c_short);
+            // Log spam azaltmak için debug
+            debug!("✅ [{}] Zaten güncel.", svc_name);
             return Ok(false);
         }
 
-        let c_short = if current_image_id.len() > 12 { &current_image_id[..12] } else { &current_image_id };
-        let n_short = if new_image_id.len() > 12 { &new_image_id[..12] } else { &new_image_id };
-
-        info!("🚀 [{}] GÜNCELLEME TESPİT EDİLDİ! Eski: {} -> Yeni: {}", svc_name, c_short, n_short);
+        info!("🚀 [{}] UPDATE STARTED! {} -> {}", svc_name, &current_image_id[..12], &new_image_id[..12]);
 
         let config = Config {
             image: Some(image_name.clone()),

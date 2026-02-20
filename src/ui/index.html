@@ -2,40 +2,80 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>SENTIRIC | NEXUS v5.1</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"> <!-- Mobile Viewport -->
+    <title>SENTIRIC | NEXUS v5.2</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💠</text></svg>">
     <link rel="stylesheet" href="/ui/css/theme.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=JetBrains+Mono&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/ui/css/layout.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 </head>
 <body>
-    <div id="app">
-        <!-- HEADER -->
-        <header style="padding: 15px 20px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; background: var(--bg-panel);">
-            <div style="font-weight: 800; font-size: 16px;">SENTIRIC <span style="color: var(--color-primary);">NEXUS</span> <span style="font-size:10px; opacity:0.5;">v5.1</span></div>
-            <div style="display: flex; gap: 20px; font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);">
-                <span>NODE: <b id="node-name" style="color: #fff">...</b></span>
-                <span>STATUS: <b id="status-indicator" style="color: var(--color-accent)">ONLINE</b></span>
+    <div class="app-container">
+        <!-- SIDEBAR / HOST STATS -->
+        <aside class="sidebar">
+            <div class="brand">
+                <div class="logo">💠</div>
+                <div class="title">SENTIRIC<br><span class="subtitle">ORCHESTRATOR</span></div>
             </div>
-        </header>
 
-        <!-- MAIN GRID -->
-        <div id="services-grid" class="nexus-grid">
-            <div style="color: #444; text-align: center; grid-column: 1/-1; padding-top: 50px;">Waiting for telemetry...</div>
-        </div>
+            <div class="host-panel">
+                <div class="panel-header">HOST NODE</div>
+                <div class="node-name" id="host-name">LOADING...</div>
+                
+                <!-- Host CPU -->
+                <div class="stat-row">
+                    <div class="stat-label"><span>CPU LOAD</span><span id="host-cpu-val">0%</span></div>
+                    <div class="progress-track"><div class="progress-fill cpu" id="host-cpu-bar" style="width: 0%"></div></div>
+                </div>
+
+                <!-- Host RAM -->
+                <div class="stat-row">
+                    <div class="stat-label"><span>RAM USAGE</span><span id="host-ram-val">0/0 GB</span></div>
+                    <div class="progress-track"><div class="progress-fill ram" id="host-ram-bar" style="width: 0%"></div></div>
+                </div>
+
+                <!-- Host GPU (Eğer varsa) -->
+                <div class="stat-row" id="host-gpu-row" style="opacity: 0.5">
+                    <div class="stat-label"><span>GPU COMPUTE</span><span id="host-gpu-val">N/A</span></div>
+                    <div class="progress-track"><div class="progress-fill gpu" id="host-gpu-bar" style="width: 0%"></div></div>
+                </div>
+
+                <div class="panel-footer">
+                    <div>UPTIME: <span id="host-uptime" style="color: #fff">--</span></div>
+                    <div style="font-size: 9px; margin-top:5px; color:#444">SENTIRIC CLUSTER PROTOCOL v5.2</div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- MAIN CONTENT -->
+        <main class="main-content">
+            <header class="top-bar">
+                <div class="breadcrumbs">CLUSTER / <span style="color:var(--color-accent)">ACTIVE NODES</span></div>
+                <div class="global-actions">
+                    <div class="connection-status" id="conn-status">● DISCONNECTED</div>
+                </div>
+            </header>
+
+            <div id="services-grid" class="nexus-grid">
+                <div class="empty-state">Waiting for telemetry stream...</div>
+            </div>
+        </main>
     </div>
-    
-    <!-- YENİ: LOG MODAL -->
-    <div id="log-modal" class="modal-overlay" style="display: none;">
+
+    <!-- LOG MODAL -->
+    <div id="log-modal" class="modal-overlay">
         <div class="modal-content">
             <div class="modal-header">
-                <span id="log-modal-title">Logs</span>
-                <button id="log-modal-close" class="modal-close-btn">&times;</button>
+                <span id="log-modal-title">TERMINAL OUTPUT</span>
+                <button id="log-modal-close" class="modal-close-btn">ESC</button>
             </div>
             <div id="log-output" class="log-container"></div>
+            <div class="modal-footer">
+                <span class="blink">_</span> LIVE STREAM
+            </div>
         </div>
     </div>
 
-    <!-- MODULES -->
     <script type="module" src="/ui/js/app.js"></script>
 </body>
 </html>
