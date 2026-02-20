@@ -155,6 +155,24 @@ async fn main() -> anyhow::Result<()> {
                             });
                         }
 
+
+                        // ---------------------------------------------------------
+                        // GEÇİÇİ GPU TESPİTİ (SMART GPU DETECTION)
+                        // ---------------------------------------------------------
+                        let mut has_gpu = false;
+                        
+                        // 1. İsim bazlı kontrol (Keyword search)
+                        // 'media' kelimesini çıkardık, CPU tabanlı medya sunucuları için hatalıydı.
+                        if name.contains("llm") || name.contains("ocr") || name.contains("cuda") || name.contains("diffusion") {
+                            has_gpu = true;
+                        }
+
+                        // 2. Environment Variable Kontrolü (Kesin Çözüm)
+                        // Eğer Inspect datasında NVIDIA varsa işaretle.
+                        // (Not: ListContainers'da env gelmez, Inspect atmak lazım ama performans için şimdilik isme güveniyoruz.
+                        // Ancak ServiceInstance oluşturulurken Inspect yapmıyoruz. 
+                        // O yüzden şimdilik 'media' keyword'ünü çıkarmak sorunu çözer.)
+                        
                         let svc = ServiceInstance {
                             name: name.clone(),
                             image: c.image.unwrap_or_default(),
@@ -164,11 +182,12 @@ async fn main() -> anyhow::Result<()> {
                             node: scan_node.clone(),
                             cpu_usage: cpu_percent,
                             mem_usage: mem_usage_mb,
-                            has_gpu: name.contains("llm") || name.contains("ocr") || name.contains("media"),
+                            has_gpu: has_gpu, // Güncellendi
                         };
                         
                         cache.insert(name, svc.clone());
                         list.push(svc);
+
                     }
                 }
                 Err(e) => { error!("⚠️ Docker Hatası: {}", e); }
