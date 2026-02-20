@@ -97,3 +97,10 @@ button:disabled { opacity: 0.3; cursor: not-allowed; }
 }
 .blink { animation: blinker 1s linear infinite; }
 @keyframes blinker { 50% { opacity: 0; } }
+
+/* Mevcut CSS'in sonuna ekle */
+.modal-tabs { display: flex; gap: 10px; }
+.tab-btn { background: transparent; border: none; color: #666; font-weight: bold; font-size: 12px; cursor: pointer; padding-bottom: 5px; border-bottom: 2px solid transparent; }
+.tab-btn.active { color: #fff; border-bottom-color: var(--accent); }
+.tab-btn:hover { color: #ccc; }
+.modal-view { flex: 1; overflow: hidden; display: flex; flex-direction: column; }

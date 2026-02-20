@@ -6,10 +6,11 @@ pub struct AppConfig {
     pub node_name: String,
     pub host: String,
     pub http_port: u16,
-    pub _grpc_port: u16, // Kullanılmıyordu, warning için _ eklendi
+    pub _grpc_port: u16,
     pub docker_socket: String,
     pub poll_interval: u64,
     pub auto_pilot_services: Vec<String>,
+    pub upstream_url: Option<String>, // YENİ
 }
 
 impl AppConfig {
@@ -19,6 +20,9 @@ impl AppConfig {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
+                        
+        let upstream = env::var("UPSTREAM_ORCHESTRATOR_URL").ok()
+            .filter(|s| !s.trim().is_empty());
 
         Self {
             env: env::var("ENV").unwrap_or_else(|_| "production".into()),
@@ -32,8 +36,9 @@ impl AppConfig {
                 if cfg!(target_os = "windows") { "//./pipe/docker_engine".into() } 
                 else { "/var/run/docker.sock".into() }
             ),
-            poll_interval: env::var("POLL_INTERVAL").unwrap_or("30".to_string()).parse().unwrap_or(30),
+            poll_interval: env::var("POLL_INTERVAL").unwrap_or("5".to_string()).parse().unwrap_or(5),
             auto_pilot_services: ap_list,
+            upstream_url: upstream,
         }
     }
 }
