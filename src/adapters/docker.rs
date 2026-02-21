@@ -1,3 +1,4 @@
+// src/adapters/docker.rs
 use bollard::Docker;
 use bollard::container::{StopContainerOptions, RemoveContainerOptions, Config, CreateContainerOptions, StartContainerOptions, InspectContainerOptions, RestartContainerOptions, LogsOptions, LogOutput, Stats, StatsOptions, PruneContainersOptions};
 use bollard::image::{CreateImageOptions, PruneImagesOptions};
@@ -9,6 +10,7 @@ use std::default::Default;
 #[derive(Clone)]
 pub struct DockerAdapter {
     client: Docker,
+    // `node_name` is never read
     node_name: String,
 }
 
@@ -27,19 +29,19 @@ impl DockerAdapter {
     
     // --- LIFECYCLE ---
     pub async fn start_service(&self, svc_id: &str) -> Result<()> {
-        info!("▶️ Starting: {}", svc_id);
+        info!(event="CONTAINER_START", container.id=%svc_id, "▶️ Starting container");
         self.client.start_container(svc_id, None::<StartContainerOptions<String>>).await?;
         Ok(())
     }
 
     pub async fn stop_service(&self, svc_id: &str) -> Result<()> {
-        info!("🛑 Stopping: {}", svc_id);
+        info!(event="CONTAINER_STOP", container.id=%svc_id, "🛑 Stopping container");
         self.client.stop_container(svc_id, Some(StopContainerOptions { t: 10 })).await?;
         Ok(())
     }
     
     pub async fn restart_service(&self, svc_id: &str) -> Result<()> {
-        info!("🔄 Restarting: {}", svc_id);
+        info!(event="CONTAINER_RESTART", container.id=%svc_id, "🔄 Restarting container");
         self.client.restart_container(svc_id, Some(RestartContainerOptions { t: 10 })).await?;
         Ok(())
     }
@@ -86,7 +88,7 @@ impl DockerAdapter {
             .map_err(|e| anyhow::anyhow!("Inspect error: {}", e))
     }
 
-    // THE JANITOR (Generic Fix Applied Here)
+    // THE JANITOR
     pub async fn prune_system(&self) -> Result<String> {
         let c_prune = self.client.prune_containers(None::<PruneContainersOptions<String>>).await?;
         let c_deleted = c_prune.containers_deleted.unwrap_or_default().len();
@@ -95,9 +97,16 @@ impl DockerAdapter {
         let i_deleted = i_prune.images_deleted.unwrap_or_default().len();
         let space = i_prune.space_reclaimed.unwrap_or(0);
 
-        let msg = format!("♻️ JANITOR REPORT: Deleted {} Containers, {} Images. Reclaimed {:.2} MB", 
+        let msg = format!("Deleted {} Containers, {} Images. Reclaimed {:.2} MB", 
             c_deleted, i_deleted, (space as f64 / 1024.0 / 1024.0));
-        info!("{}", msg);
+            
+        info!(
+            event = "SYSTEM_PRUNE",
+            deleted.containers = c_deleted,
+            deleted.images = i_deleted,
+            reclaimed.mb = (space as f64 / 1024.0 / 1024.0),
+            "♻️ JANITOR REPORT: {}", msg
+        );
         Ok(msg)
     }
 
@@ -116,11 +125,11 @@ impl DockerAdapter {
         
         debug!("🔍 [{}] Checking updates: {}", svc_name, image_name);
 
-        // 1. PULL (Herkes için yapılır)
+        // 1. PULL
         let mut stream = docker.create_image(Some(CreateImageOptions { from_image: image_name.clone(), ..Default::default() }), None, None);
         while let Some(res) = stream.next().await {
             if let Err(e) = res { 
-                error!("❌ [{}] Pull Error: {}", svc_name, e);
+                error!(event="IMAGE_PULL_FAIL", service=%svc_name, error=%e, "❌ Pull Error");
                 return Err(anyhow::anyhow!("Registry error")); 
             }
         }
@@ -131,19 +140,22 @@ impl DockerAdapter {
 
         if current_image_id == new_image_id { return Ok(false); }
 
-        info!("🚀 [{}] UPDATE FOUND: {} -> {}", svc_name, &current_image_id[..12], &new_image_id[..12]);
+        info!(
+            event = "AUTO_PILOT_UPDATE_FOUND",
+            service = %svc_name,
+            old.sha = %&current_image_id[..12],
+            new.sha = %&new_image_id[..12],
+            "🚀 UPDATE FOUND"
+        );
 
-        // --- KRİTİK MÜDAHALE ---
         if is_self {
-            // Eğer kendisi ise ASLA Stop/Remove yapma.
-            // Sadece log bas ve kullanıcıyı uyar.
-            warn!("⚠️ SELF-UPDATE PREVENTED: Orchestrator cannot restart itself autonomously.");
-            warn!("👉 ACTION REQUIRED: Image pulled. Please run 'docker restart {}' manually.", svc_name);
-            
-            // "True" dönüyoruz ki UI güncellendiğini bilsin (ama restart beklesin)
+            warn!(
+                event = "SELF_UPDATE_PREVENTED",
+                service = %svc_name,
+                "⚠️ SELF-UPDATE PREVENTED: Orchestrator cannot restart itself autonomously."
+            );
             return Ok(true); 
         }
-        // -----------------------
 
         let config = Config {
             image: Some(image_name.clone()),
@@ -156,19 +168,17 @@ impl DockerAdapter {
             ..Default::default()
         };
 
-        info!("🛑 Stopping: {}", svc_name);
+        info!(event="CONTAINER_RECREATING", service=%svc_name, "🛑 Stopping & Removing old container");
         let _ = docker.stop_container(svc_name, Some(StopContainerOptions { t: 10 })).await;
-        
-        info!("🗑️ Removing: {}", svc_name);
         let _ = docker.remove_container(svc_name, Some(RemoveContainerOptions { force: true, ..Default::default() })).await;
         
-        info!("✨ Re-Creating: {}", svc_name);
+        info!(event="CONTAINER_CREATING", service=%svc_name, "✨ Creating new container");
         docker.create_container(Some(CreateContainerOptions { name: svc_name.to_string(), platform: None }), config).await?;
         
-        info!("🚀 Starting: {}", svc_name);
+        info!(event="CONTAINER_STARTING", service=%svc_name, "🚀 Starting new container");
         docker.start_container(svc_name, None::<StartContainerOptions<String>>).await?;
 
-        info!("✅ [{}] Updated successfully.", svc_name);
+        info!(event="AUTO_PILOT_SUCCESS", service=%svc_name, "✅ Updated successfully.");
         Ok(true)
     }
 

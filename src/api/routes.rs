@@ -1,3 +1,4 @@
+// src/api/routes.rs
 use axum::{
     extract::{State, Query, Path, ws::{Message, WebSocket, WebSocketUpgrade}},
     response::{Html, IntoResponse, Response},
@@ -9,6 +10,7 @@ use std::sync::Arc;
 use crate::core::domain::{ActionParams, ToggleParams, ClusterReport, ServiceInstance};
 use crate::AppState;
 use futures_util::StreamExt;
+use tracing::{info};
 
 pub fn create_router(state: Arc<AppState>) -> Router {
     Router::new()
@@ -89,18 +91,23 @@ async fn status_handler(State(state): State<Arc<AppState>>) -> Json<Vec<ServiceI
     let s = state.services_cache.lock().await; Json(s.values().cloned().collect())
 }
 async fn update_handler(State(state): State<Arc<AppState>>, Query(p): Query<ActionParams>) -> Response {
+    info!(event="MANUAL_UPDATE_TRIGGERED", service=%p.service, "API Update Request");
     match state.docker.force_update_service(&p.service).await { Ok(m) => (StatusCode::OK, m).into_response(), Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response() }
 }
 async fn toggle_handler(State(state): State<Arc<AppState>>, Json(p): Json<ToggleParams>) -> Json<bool> {
+    info!(event="AUTOPILOT_TOGGLED", service=%p.service, enabled=%p.enabled, "Auto-pilot toggle");
     state.auto_pilot_config.lock().await.insert(p.service, p.enabled); Json(p.enabled)
 }
 async fn start_handler(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
+    info!(event="MANUAL_START", container=%id, "API Start Request");
     match state.docker.start_service(&id).await { Ok(_) => (StatusCode::OK, "Started").into_response(), Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response() }
 }
 async fn stop_handler(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
+    info!(event="MANUAL_STOP", container=%id, "API Stop Request");
     match state.docker.stop_service(&id).await { Ok(_) => (StatusCode::OK, "Stopped").into_response(), Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response() }
 }
 async fn restart_handler(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
+    info!(event="MANUAL_RESTART", container=%id, "API Restart Request");
     match state.docker.restart_service(&id).await { Ok(_) => (StatusCode::OK, "Restarted").into_response(), Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response() }
 }
 async fn index_handler() -> impl IntoResponse { Html(include_str!("../ui/index.html")) }
