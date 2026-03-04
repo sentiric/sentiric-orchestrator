@@ -1,4 +1,6 @@
+// src/core/domain.rs
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ServiceInstance {
@@ -26,7 +28,6 @@ pub struct NodeStats {
     pub status: String,
 }
 
-// YENİ: Edge Node'lardan gelen rapor paketi
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ClusterReport {
     pub node: String,
@@ -44,4 +45,26 @@ pub struct ActionParams {
 pub struct ToggleParams {
     pub service: String, 
     pub enabled: bool 
+}
+
+// --- YENİ: TOPOLOJİ MODELLERİ ---
+#[derive(Serialize, Clone, Debug)]
+pub struct TopologyNode {
+    pub id: String,
+    pub label: String,
+    pub group: String, 
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct TopologyEdge {
+    pub from: String,
+    pub to: String,
+    pub label: String,
+    pub dashes: bool,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct TopologyMap {
+    pub nodes: Vec<TopologyNode>,
+    pub edges: Vec<TopologyEdge>,
 }

@@ -1,4 +1,6 @@
+// src/ui/js/app.js
 import { WebSocketStream } from './websocket.js';
+import { TopologyMap } from './components/topology.js';
 
 const state = {
     cluster: {},
@@ -17,15 +19,41 @@ const ui = {
     inspectView: document.getElementById('view-inspect'),
     inspectOutput: document.getElementById('inspect-output'),
     logTitle: document.getElementById('log-modal-title'),
+    
+    // View Switcher
+    btnViewGrid: document.getElementById('btn-view-grid'),
+    btnViewTopology: document.getElementById('btn-view-topology'),
+    viewGrid: document.getElementById('view-grid'),
+    viewTopology: document.getElementById('view-topology'),
+
+    topology: null,
+
+    init() {
+        this.topology = new TopologyMap('topology-network');
+        
+        // Tab Events
+        this.btnViewGrid.onclick = () => {
+            this.btnViewGrid.classList.add('active');
+            this.btnViewTopology.classList.remove('active');
+            this.viewGrid.style.display = 'block';
+            this.viewTopology.style.display = 'none';
+        };
+
+        this.btnViewTopology.onclick = () => {
+            this.btnViewTopology.classList.add('active');
+            this.btnViewGrid.classList.remove('active');
+            this.viewGrid.style.display = 'none';
+            this.viewTopology.style.display = 'block';
+            this.topology.draw(); // Canvas'ı renderla
+        };
+    },
 
     renderSidebar() {
         if (!state.cluster) return;
         const nodes = Object.keys(state.cluster).sort();
-
-        // Auto Select first node if none selected
         if (!state.selectedNode && nodes.length > 0) {
             state.selectedNode = nodes[0];
-            state.localNodeName = nodes[0]; // Assume first is local initially
+            state.localNodeName = nodes[0];
         }
 
         let html = '';
@@ -58,10 +86,6 @@ const ui = {
         const h = data.stats;
         const services = data.services;
 
-        // Header
-        document.getElementById('active-view-node').innerText = state.selectedNode;
-
-        // Host Stats
         document.getElementById('host-name').innerText = h.name;
         document.getElementById('host-cpu-val').innerText = `${h.cpu_usage.toFixed(1)}%`;
         document.getElementById('host-cpu-bar').style.width = `${Math.min(h.cpu_usage, 100)}%`;
@@ -69,15 +93,12 @@ const ui = {
         document.getElementById('host-ram-val').innerText = `${(h.ram_used/1024).toFixed(1)} GB`;
         document.getElementById('host-ram-bar').style.width = `${Math.min(ramPct, 100)}%`;
 
-        if(h.gpu_usage > 0) {
-            document.getElementById('host-gpu-row').style.opacity = 1;
-            document.getElementById('host-gpu-val').innerText = `${h.gpu_usage.toFixed(1)}%`;
-            document.getElementById('host-gpu-bar').style.width = `${Math.min(h.gpu_usage, 100)}%`;
-        }
-
-        // Grid
+        // Render Grid
         const sorted = [...services].sort((a, b) => a.name.localeCompare(b.name));
         this.grid.innerHTML = sorted.map(svc => this.createCard(svc)).join('');
+
+        // YENİ: Topolojiyi Live Data ile Besle (Renkleri Güncelle)
+        this.topology.updateLiveState(services);
     },
 
     createCard(svc) {
@@ -86,28 +107,19 @@ const ui = {
         const cpuPct = Math.min(svc.cpu_usage, 100);
         const ramPct = Math.min((svc.mem_usage / 2048) * 100, 100); 
 
-        // Remote Node Check (If selected node is not local, disable actions or link)
-        // Simple logic: If we are viewing a node different from what we think is local, warn user.
-        const isRemote = state.selectedNode !== state.localNodeName;
-        
-        let actions = '';
-        if (isRemote) {
-            actions = `<button onclick="window.open('http://${state.selectedNode}:11080', '_blank')" style="flex:1; border-color:var(--accent); color:var(--accent)">↗ OPEN REMOTE DASHBOARD</button>`;
-        } else {
-            actions = `
-                <button onclick="window.nexus.serviceAction('${svc.short_id}', 'start')" ${isUp?'disabled':''}>▶</button>
-                <button onclick="window.nexus.serviceAction('${svc.short_id}', 'stop')" ${!isUp?'disabled':''}>■</button>
-                <button onclick="window.nexus.serviceAction('${svc.short_id}', 'restart')" ${!isUp?'disabled':''}>↻</button>
-                <button onclick="window.nexus.openModal('${svc.short_id}', '${svc.name}')" style="flex:2">INFO</button>
-                <button class="${svc.auto_pilot?'btn-primary':''}" onclick="window.nexus.toggleAP('${svc.name}', ${!svc.auto_pilot})">AP</button>
-            `;
-        }
+        const actions = `
+            <button onclick="window.nexus.serviceAction('${svc.short_id}', 'start')" ${isUp?'disabled':''}>▶</button>
+            <button onclick="window.nexus.serviceAction('${svc.short_id}', 'stop')" ${!isUp?'disabled':''}>■</button>
+            <button onclick="window.nexus.serviceAction('${svc.short_id}', 'restart')" ${!isUp?'disabled':''}>↻</button>
+            <button onclick="window.nexus.openModal('${svc.short_id}', '${svc.name}')" style="flex:2">INFO</button>
+            <button class="${svc.auto_pilot?'btn-primary':''}" onclick="window.nexus.toggleAP('${svc.name}', ${!svc.auto_pilot})">AP</button>
+        `;
 
         return `
             <div class="card ${statusClass}">
                 <div class="card-header">
                     <div>
-                        <span class="card-title">${svc.name} ${svc.has_gpu ? '<span class="gpu-tag">GPU</span>' : ''}</span>
+                        <span class="card-title">${svc.name}</span>
                         <span class="card-subtitle">${svc.image.substring(0, 25)}...</span>
                     </div>
                     <div><span style="font-size:10px; font-weight:bold; color:#fff">${isUp?'RUNNING':'STOPPED'}</span></div>
@@ -129,14 +141,14 @@ const ui = {
     },
 
     async switchTab(tab) {
-        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.modal-tabs .tab-btn').forEach(b => b.classList.remove('active'));
         if(tab === 'logs') {
-            document.querySelector('button[onclick*="logs"]').classList.add('active');
+            document.querySelector('.modal-tabs button[onclick*="logs"]').classList.add('active');
             this.logView.style.display = 'flex';
             this.inspectView.style.display = 'none';
             this.startLogStream(state.currentId);
         } else {
-            document.querySelector('button[onclick*="inspect"]').classList.add('active');
+            document.querySelector('.modal-tabs button[onclick*="inspect"]').classList.add('active');
             this.logView.style.display = 'none';
             this.inspectView.style.display = 'flex';
             this.loadInspect(state.currentId);
@@ -144,11 +156,12 @@ const ui = {
     },
 
     startLogStream(id) {
-        this.logView.innerHTML = '';
+        this.logView.innerHTML = '<div id="log-output" class="log-container"></div>';
+        const logOutput = document.getElementById('log-output');
         if (state.logSocket) state.logSocket.close();
         state.logSocket = new WebSocket(`ws://${window.location.host}/ws/logs/${id}`);
         state.logSocket.onmessage = (e) => {
-            this.logView.innerHTML += e.data;
+            logOutput.innerHTML += e.data;
             this.logView.scrollTop = this.logView.scrollHeight;
         };
     },
@@ -191,9 +204,12 @@ window.nexus = {
     }
 };
 
+// --- BOOT SEQUENCE ---
 document.getElementById('log-modal-close').onclick = () => ui.hideModal();
 document.getElementById('btn-prune').onclick = () => window.nexus.pruneSystem();
 document.getElementById('btn-export').onclick = () => window.nexus.exportLLM();
+
+ui.init(); // Topoloji başlatılır
 
 new WebSocketStream(`ws://${window.location.host}/ws`, (msg) => {
     ui.connStatus.innerText = "● CLUSTER LINK ACTIVE";
@@ -201,7 +217,6 @@ new WebSocketStream(`ws://${window.location.host}/ws`, (msg) => {
     
     if (msg.type === 'cluster_update') {
         state.cluster = msg.data;
-        // İlk açılışta yerel node'u tahmin etmeye çalış (ilk gelen)
         if (!state.localNodeName && Object.keys(state.cluster).length > 0) {
             state.localNodeName = Object.keys(state.cluster)[0];
         }

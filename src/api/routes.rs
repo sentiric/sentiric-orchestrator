@@ -7,10 +7,10 @@ use axum::{
     Json, Router,
 };
 use std::sync::Arc;
-use crate::core::domain::{ActionParams, ToggleParams, ClusterReport, ServiceInstance};
+use crate::core::domain::{ActionParams, ToggleParams, ClusterReport, ServiceInstance, TopologyMap, TopologyNode, TopologyEdge};
 use crate::AppState;
 use futures_util::StreamExt;
-use tracing::{info};
+use tracing::info;
 
 pub fn create_router(state: Arc<AppState>) -> Router {
     Router::new()
@@ -19,11 +19,13 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/ui/css/layout.css", get(css_layout_handler))
         .route("/ui/js/app.js", get(js_app_handler))
         .route("/ui/js/websocket.js", get(js_ws_handler))
+        .route("/ui/js/components/topology.js", get(js_topology_handler)) // YENİ
         .route("/ws", get(ws_handler))
         .route("/ws/logs/:id", get(ws_logs_handler))
         
         // API
         .route("/api/status", get(status_handler))
+        .route("/api/topology", get(topology_handler)) // YENİ
         .route("/api/update", post(update_handler))
         .route("/api/toggle-autopilot", post(toggle_handler))
         .route("/api/service/:id/start", post(start_handler))
@@ -39,16 +41,76 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
-// HANDLERS
+// --- YENİ: SENTIRIC ANAYASAL TOPOLOJİSİ (HARDCODED EXPECTED STATE) ---
+async fn topology_handler() -> Json<TopologyMap> {
+    let nodes = vec![
+        // Edge & Telecom
+        TopologyNode { id: "sbc-service".into(), label: "SBC\n(Edge)".into(), group: "edge".into() },
+        TopologyNode { id: "proxy-service".into(), label: "Proxy\n(Router)".into(), group: "telecom".into() },
+        TopologyNode { id: "b2bua-service".into(), label: "B2BUA\n(Session)".into(), group: "telecom".into() },
+        TopologyNode { id: "registrar-service".into(), label: "Registrar\n(Location)".into(), group: "telecom".into() },
+        TopologyNode { id: "media-service".into(), label: "Media\n(RTP Engine)".into(), group: "telecom".into() },
+        
+        // Core Logic
+        TopologyNode { id: "dialplan-service".into(), label: "Dialplan\n(Routing)".into(), group: "core".into() },
+        TopologyNode { id: "user-service".into(), label: "User\n(Identity)".into(), group: "core".into() },
+        TopologyNode { id: "workflow-service".into(), label: "Workflow\n(Cortex)".into(), group: "core".into() },
+        TopologyNode { id: "agent-service".into(), label: "Agent\n(Orchestrator)".into(), group: "core".into() },
+        
+        // AI Gateways
+        TopologyNode { id: "stt-gateway-service".into(), label: "STT\nGateway".into(), group: "ai".into() },
+        TopologyNode { id: "tts-gateway-service".into(), label: "TTS\nGateway".into(), group: "ai".into() },
+        TopologyNode { id: "llm-gateway-service".into(), label: "LLM\nGateway".into(), group: "ai".into() },
+        
+        // Infra
+        TopologyNode { id: "rabbitmq".into(), label: "RabbitMQ\n(Event Bus)".into(), group: "infra".into() },
+        TopologyNode { id: "redis".into(), label: "Redis\n(State)".into(), group: "infra".into() },
+        TopologyNode { id: "postgres".into(), label: "Postgres\n(Data)".into(), group: "infra".into() },
+    ];
+
+    let edges = vec![
+        // SIP Flow
+        TopologyEdge { from: "sbc-service".into(), to: "proxy-service".into(), label: "SIP".into(), dashes: false },
+        TopologyEdge { from: "proxy-service".into(), to: "b2bua-service".into(), label: "SIP".into(), dashes: false },
+        TopologyEdge { from: "proxy-service".into(), to: "registrar-service".into(), label: "gRPC".into(), dashes: false },
+        TopologyEdge { from: "proxy-service".into(), to: "dialplan-service".into(), label: "gRPC".into(), dashes: false },
+        
+        // B2BUA Media & Events
+        TopologyEdge { from: "b2bua-service".into(), to: "media-service".into(), label: "gRPC".into(), dashes: false },
+        TopologyEdge { from: "b2bua-service".into(), to: "rabbitmq".into(), label: "AMQP".into(), dashes: false },
+        TopologyEdge { from: "b2bua-service".into(), to: "redis".into(), label: "TCP".into(), dashes: false },
+        TopologyEdge { from: "b2bua-service".into(), to: "dialplan-service".into(), label: "gRPC".into(), dashes: false },
+        
+        // Logic Data
+        TopologyEdge { from: "registrar-service".into(), to: "redis".into(), label: "TCP".into(), dashes: false },
+        TopologyEdge { from: "registrar-service".into(), to: "user-service".into(), label: "gRPC".into(), dashes: false },
+        TopologyEdge { from: "dialplan-service".into(), to: "user-service".into(), label: "gRPC".into(), dashes: false },
+        TopologyEdge { from: "dialplan-service".into(), to: "postgres".into(), label: "TCP".into(), dashes: false },
+        TopologyEdge { from: "user-service".into(), to: "postgres".into(), label: "TCP".into(), dashes: false },
+        
+        // Workflow Cortex
+        TopologyEdge { from: "rabbitmq".into(), to: "workflow-service".into(), label: "AMQP".into(), dashes: false },
+        TopologyEdge { from: "workflow-service".into(), to: "postgres".into(), label: "TCP".into(), dashes: false },
+        TopologyEdge { from: "workflow-service".into(), to: "redis".into(), label: "TCP".into(), dashes: false },
+        TopologyEdge { from: "workflow-service".into(), to: "media-service".into(), label: "gRPC".into(), dashes: true },
+        TopologyEdge { from: "workflow-service".into(), to: "agent-service".into(), label: "gRPC".into(), dashes: false },
+        TopologyEdge { from: "workflow-service".into(), to: "b2bua-service".into(), label: "gRPC".into(), dashes: true },
+
+        // Agent & AI
+        TopologyEdge { from: "agent-service".into(), to: "stt-gateway-service".into(), label: "gRPC".into(), dashes: false },
+        TopologyEdge { from: "agent-service".into(), to: "tts-gateway-service".into(), label: "gRPC".into(), dashes: false },
+        TopologyEdge { from: "agent-service".into(), to: "llm-gateway-service".into(), label: "gRPC".into(), dashes: false },
+        TopologyEdge { from: "agent-service".into(), to: "redis".into(), label: "TCP".into(), dashes: false },
+    ];
+
+    Json(TopologyMap { nodes, edges })
+}
 
 async fn ingest_report_handler(State(state): State<Arc<AppState>>, Json(report): Json<ClusterReport>) -> StatusCode {
     let node_name = report.node.clone();
     state.cluster_cache.lock().await.insert(node_name, report);
-    
-    // UI Update Trigger
     let cluster_map = state.cluster_cache.lock().await.clone();
     let _ = state.tx.send(serde_json::json!({ "type": "cluster_update", "data": cluster_map }).to_string());
-    
     StatusCode::OK
 }
 
@@ -115,3 +177,4 @@ async fn css_theme_handler() -> impl IntoResponse { ([(header::CONTENT_TYPE, "te
 async fn css_layout_handler() -> impl IntoResponse { ([(header::CONTENT_TYPE, "text/css")], include_str!("../ui/css/layout.css")) }
 async fn js_app_handler() -> impl IntoResponse { ([(header::CONTENT_TYPE, "application/javascript")], include_str!("../ui/js/app.js")) }
 async fn js_ws_handler() -> impl IntoResponse { ([(header::CONTENT_TYPE, "application/javascript")], include_str!("../ui/js/websocket.js")) }
+async fn js_topology_handler() -> impl IntoResponse { ([(header::CONTENT_TYPE, "application/javascript")], include_str!("../ui/js/components/topology.js")) }
