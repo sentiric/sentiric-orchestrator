@@ -3,9 +3,10 @@ use axum::{
     extract::{State, Query, Path, ws::{Message, WebSocket, WebSocketUpgrade}},
     response::{Html, IntoResponse, Response},
     routing::{get, post},
-    http::{StatusCode, header},
+    http::StatusCode,
     Json, Router,
 };
+use tower_http::services::ServeDir; // KRİTİK EKLENTİ
 use std::sync::Arc;
 use crate::core::domain::{ActionParams, ToggleParams, ClusterReport, ServiceInstance, TopologyMap, TopologyNode, TopologyEdge};
 use crate::AppState;
@@ -15,10 +16,10 @@ use tracing::info;
 pub fn create_router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/", get(index_handler))
-        .route("/ui/css/theme.css", get(css_theme_handler))
-        .route("/ui/css/layout.css", get(css_layout_handler))
-        .route("/ui/js/app.js", get(js_app_handler))
-        .route("/ui/js/websocket.js", get(js_ws_handler))
+        
+        // KRİTİK DÜZELTME: Tüm UI klasörünü otomatik MIME Type desteği ile açıyoruz
+        .nest_service("/ui", ServeDir::new("src/ui"))
+        
         .route("/ws", get(ws_handler))
         .route("/ws/logs/:id", get(ws_logs_handler))
         
@@ -33,11 +34,17 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/service/:id/inspect", get(inspect_handler))
         .route("/api/system/prune", post(prune_handler))
         .route("/api/export/llm", get(export_llm_handler))
-        
-        // HIVE MIND
         .route("/api/ingest/report", post(ingest_report_handler))
         
         .with_state(state)
+}
+
+// Ana sayfa artık dosyadan okunacak
+async fn index_handler() -> impl IntoResponse {
+    match std::fs::read_to_string("src/ui/index.html") {
+        Ok(html) => Html(html),
+        Err(_) => Html("<h1>System Error: UI assets not found. Check src/ui folder.</h1>".to_string()),
+    }
 }
 
 // --- SENTIRIC ANAYASAL TOPOLOJİSİ ---
@@ -100,14 +107,56 @@ async fn ingest_report_handler(State(state): State<Arc<AppState>>, Json(report):
 async fn export_llm_handler(State(state): State<Arc<AppState>>) -> String {
     let cluster = state.cluster_cache.lock().await;
     let mut report = String::from("# 🤖 SENTIRIC CLUSTER DIAGNOSTIC REPORT\n\n");
+    
+    report.push_str("## 1. INFRASTRUCTURE HEALTH\n");
     for (node, data) in cluster.iter() {
-        report.push_str(&format!("## NODE: {} (Status: {})\n", node, data.stats.status));
-        report.push_str(&format!("CPU: {:.1}% | RAM: {}MB\n", data.stats.cpu_usage, data.stats.ram_used));
+        report.push_str(&format!("- **{}** | CPU: {:.1}% | RAM: {}/{} MB | Status: {}\n", 
+            node, data.stats.cpu_usage, data.stats.ram_used, data.stats.ram_total, data.stats.status));
+    }
+    
+    report.push_str("\n## 2. CONFIG DRIFT DETECTION\n");
+    let mut service_versions: std::collections::HashMap<String, Vec<(String, String)>> = std::collections::HashMap::new();
+    
+    for (node, data) in cluster.iter() {
         for svc in &data.services {
-             report.push_str(&format!("- [{}] {} (Img: {})\n", svc.status, svc.name, svc.image));
+            let img_hash = svc.image.split('@').last().unwrap_or(&svc.image).to_string();
+            service_versions.entry(svc.name.clone())
+                .or_insert_with(Vec::new)
+                .push((node.clone(), img_hash));
+        }
+    }
+
+    let mut drift_found = false;
+    for (svc_name, deployments) in service_versions {
+        if deployments.len() > 1 {
+            let first_hash = &deployments[0].1;
+            let has_mismatch = deployments.iter().any(|d| &d.1 != first_hash);
+            
+            if has_mismatch {
+                drift_found = true;
+                report.push_str(&format!("⚠️ **DRIFT DETECTED: {}**\n", svc_name));
+                for d in deployments {
+                    report.push_str(&format!("   - {}: Image Hash {}\n", d.0, d.1));
+                }
+            }
+        }
+    }
+    
+    if !drift_found {
+        report.push_str("✅ No configuration drift detected. Cluster is synchronized.\n");
+    }
+
+    report.push_str("\n## 3. SERVICE DETAILS\n");
+    for (node, data) in cluster.iter() {
+        report.push_str(&format!("### {}\n", node));
+        for svc in &data.services {
+             let status_icon = if svc.status.to_lowercase().contains("up") { "🟢" } else { "🔴" };
+             report.push_str(&format!("- {} **{}** | CPU: {:.1}% | RAM: {}MB | AP: {}\n", 
+                status_icon, svc.name, svc.cpu_usage, svc.mem_usage, svc.auto_pilot));
         }
         report.push_str("\n");
     }
+
     report
 }
 
@@ -155,8 +204,3 @@ async fn restart_handler(State(state): State<Arc<AppState>>, Path(id): Path<Stri
     info!(event="MANUAL_RESTART", container=%id, "API Restart Request");
     match state.docker.restart_service(&id).await { Ok(_) => (StatusCode::OK, "Restarted").into_response(), Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response() }
 }
-async fn index_handler() -> impl IntoResponse { Html(include_str!("../ui/index.html")) }
-async fn css_theme_handler() -> impl IntoResponse { ([(header::CONTENT_TYPE, "text/css")], include_str!("../ui/css/theme.css")) }
-async fn css_layout_handler() -> impl IntoResponse { ([(header::CONTENT_TYPE, "text/css")], include_str!("../ui/css/layout.css")) }
-async fn js_app_handler() -> impl IntoResponse { ([(header::CONTENT_TYPE, "application/javascript")], include_str!("../ui/js/app.js")) }
-async fn js_ws_handler() -> impl IntoResponse { ([(header::CONTENT_TYPE, "application/javascript")], include_str!("../ui/js/websocket.js")) }

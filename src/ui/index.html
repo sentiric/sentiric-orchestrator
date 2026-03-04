@@ -3,68 +3,81 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SENTIRIC | NEXUS v5.4</title>
+    <title>SENTIRIC | NEXUS ORCHESTRATOR</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💠</text></svg>">
     <link rel="stylesheet" href="/ui/css/theme.css">
     <link rel="stylesheet" href="/ui/css/layout.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
-    <!-- YENİ: Vis-Network (DAG Haritası için CDN) -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600;700;800&display=swap" rel="stylesheet">
     <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
 </head>
 <body>
-    <div class="app-container">
+    <div class="app-wrapper">
+        
         <!-- SIDEBAR -->
         <aside class="sidebar">
-            <div class="brand">
-                <div class="logo">💠</div>
-                <div class="title">SENTIRIC<br><span class="subtitle">ORCHESTRATOR</span></div>
+            <div class="brand-area">
+                <div class="brand-logo">💠</div>
+                <div class="brand-text">
+                    <h1>NEXUS <span id="v-badge">v5.5</span></h1>
+                    <span>ORCHESTRATOR</span>
+                </div>
             </div>
 
-            <div class="host-panel">
-                <div class="panel-header">CLUSTER NODES</div>
-                <div id="cluster-list"></div>
+            <div class="cluster-nodes-area">
+                <div class="area-title">CLUSTER NODES</div>
+                <div id="cluster-list" class="node-list">
+                    <!-- Dinamik Düğümler -->
+                </div>
+            </div>
 
-                <div style="padding-top: 15px; border-top: 1px solid #222; margin-top: auto;">
-                    <div class="node-name" id="host-name">LOADING...</div>
-                    <div class="stat-row">
-                        <div class="stat-label"><span>CPU</span><span id="host-cpu-val">--</span></div>
-                        <div class="progress-track"><div class="progress-fill cpu" id="host-cpu-bar" style="width: 0%"></div></div>
-                    </div>
-                    <div class="stat-row">
-                        <div class="stat-label"><span>RAM</span><span id="host-ram-val">--</span></div>
-                        <div class="progress-track"><div class="progress-fill ram" id="host-ram-bar" style="width: 0%"></div></div>
-                    </div>
+            <div class="sidebar-footer">
+                <div class="area-title" style="padding:0 0 8px 0;">SELECTED NODE</div>
+                <div style="font-family:'JetBrains Mono'; font-size:13px; font-weight:700; color:#fff; margin-bottom:12px; word-break: break-all;" id="host-name">WAITING...</div>
+                
+                <div class="mini-stats" style="margin-bottom: 8px;">
+                    <span style="font-size:10px; color:#888; width:25px;">CPU</span>
+                    <div class="mini-stat-bar"><div id="host-cpu-bar" class="mini-stat-fill cpu" style="width:0%"></div></div>
+                    <span style="font-size:10px; color:#fff; font-family:'JetBrains Mono'; width:35px; text-align:right;" id="host-cpu-val">0%</span>
+                </div>
+                <div class="mini-stats" style="margin-bottom: 20px;">
+                    <span style="font-size:10px; color:#888; width:25px;">RAM</span>
+                    <div class="mini-stat-bar"><div id="host-ram-bar" class="mini-stat-fill ram" style="width:0%"></div></div>
+                    <span style="font-size:10px; color:#fff; font-family:'JetBrains Mono'; width:45px; text-align:right;" id="host-ram-val">0 GB</span>
                 </div>
 
-                <div class="sidebar-actions" style="margin-top: 10px; display:flex; flex-direction:column; gap:5px;">
-                    <button id="btn-export" class="btn-primary" style="width: 100%;">🤖 AI EXPORT</button>
-                    <button id="btn-prune" class="btn-danger" style="width: 100%;">♻️ PRUNE (LOCAL)</button>
-                </div>
+                <button id="btn-export" class="btn btn-primary" style="width: 100%;">🤖 AI DIAGNOSTIC EXPORT</button>
+                <button id="btn-prune" class="btn btn-danger" style="width: 100%; margin-top:8px;">♻️ SYSTEM PRUNE</button>
             </div>
         </aside>
 
-        <!-- MAIN -->
-        <main class="main-content">
+        <!-- MAIN AREA -->
+        <main class="main-area">
             <header class="top-bar">
-                <div class="breadcrumbs">
-                    <!-- YENİ: View Switcher -->
-                    <button id="btn-view-grid" class="tab-btn active">SERVICES GRID</button>
-                    <button id="btn-view-topology" class="tab-btn" style="margin-left: 10px;">ARCHITECTURE MAP</button>
+                <div class="view-toggles">
+                    <button id="btn-view-grid" class="view-btn active">SERVICES GRID</button>
+                    <button id="btn-view-topology" class="view-btn">ARCHITECTURE MAP</button>
                 </div>
-                <div class="global-actions">
-                    <div class="connection-status" id="conn-status">● DISCONNECTED</div>
-                </div>
+                <div id="conn-status" class="conn-status offline">● CONNECTING...</div>
             </header>
 
-            <!-- VIEWS -->
-            <div id="view-grid" style="display:block; height:100%; overflow:hidden;">
-                <div id="services-grid" class="nexus-grid">
-                    <div class="empty-state">Waiting for cluster data...</div>
+            <!-- VIEWS WRAPPER (Absolute Positioning for Scroll Fix) -->
+            <div class="views-wrapper">
+                
+                <!-- GRID VIEW -->
+                <div id="view-grid" class="view-layer active">
+                    <div id="services-grid" class="services-grid">
+                        <div style="color:#666; font-family:'JetBrains Mono'; padding: 20px;">Awaiting telemetry from nodes...</div>
+                    </div>
                 </div>
-            </div>
 
-            <div id="view-topology" style="display:none; height:100%; overflow:hidden; background:#050505;">
-                <div id="topology-network" style="width:100%; height:100%;"></div>
+                <!-- TOPOLOGY VIEW -->
+                <div id="view-topology" class="view-layer">
+                    <div id="topology-network"></div>
+                    <div class="topo-controls">
+                        <button id="btn-freeze-physics" class="btn">❄️ FREEZE LAYOUT</button>
+                    </div>
+                </div>
+
             </div>
         </main>
     </div>
@@ -73,28 +86,24 @@
     <div id="info-modal" class="modal-overlay">
         <div class="modal-content">
             <div class="modal-header">
-                <div id="modal-tabs" class="modal-tabs">
-                    <button class="tab-btn active" onclick="window.nexus.switchTab('logs')">TERMINAL</button>
-                    <button class="tab-btn" onclick="window.nexus.switchTab('inspect')">X-RAY INSPECT</button>
+                <div class="modal-tabs">
+                    <button class="tab-btn active" data-target="view-logs">LIVE TERMINAL</button>
+                    <button class="tab-btn" data-target="view-inspect">DOCKER INSPECT</button>
                 </div>
-                <div style="flex:1; text-align:center; opacity:0.5" id="log-modal-title">...</div>
-                <button id="log-modal-close" class="modal-close-btn">ESC</button>
+                <button id="log-modal-close" class="icon-btn">✕</button>
             </div>
             
-            <div id="view-logs" class="modal-view" style="display: flex;">
+            <div id="view-logs" class="modal-view active">
                 <div id="log-output" class="log-container"></div>
             </div>
 
-            <div id="view-inspect" class="modal-view" style="display: none; padding: 20px; overflow-y: auto;">
-                <pre id="inspect-output" style="color: var(--accent); font-family: 'JetBrains Mono'; font-size: 11px;"></pre>
-            </div>
-
-            <div class="modal-footer">
-                <span class="blink">_</span> LIVE DATA STREAM
+            <div id="view-inspect" class="modal-view">
+                <pre id="inspect-output" class="log-container" style="color:var(--accent-green);"></pre>
             </div>
         </div>
     </div>
 
+    <!-- App Logic -->
     <script type="module" src="/ui/js/app.js"></script>
 </body>
 </html>

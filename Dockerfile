@@ -17,7 +17,9 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 COPY --from=builder /app/target/release/sentiric-orchestrator .
 
-# Standard Environment
+# KRİTİK DÜZELTME: UI Dosyalarını kopyala (Observer gibi)
+COPY --from=builder /app/src/ui ./src/ui
+
 ENV RUST_LOG=info
 EXPOSE 11080 11081
 

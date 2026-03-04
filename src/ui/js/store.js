@@ -4,7 +4,6 @@ export const Store = {
         cluster: {},
         selectedNode: null,
         localNodeName: null,
-        // Hafıza Sızıntısı Tespiti İçin (Memory Leak Radar)
         history: {} 
     },
     listeners: [],
@@ -27,7 +26,6 @@ export const Store = {
                 this.state.selectedNode = payload;
                 this.notify();
                 break;
-            // Optimistic UI Update for Auto-Pilot
             case 'TOGGLE_AP_OPTIMISTIC':
                 const { node, service, enabled } = payload;
                 if (this.state.cluster[node]) {
@@ -39,9 +37,8 @@ export const Store = {
         }
     },
 
-    // Yeni: Trend çizgileri için son 30 veriyi tutar
     updateHistory(clusterData) {
-        const MAX_HISTORY = 30;
+        const MAX_HISTORY = 40; // 40 veri noktası (Daha pürüzsüz grafik)
         
         Object.keys(clusterData).forEach(nodeName => {
             const services = clusterData[nodeName].services;
