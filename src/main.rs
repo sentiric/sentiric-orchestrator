@@ -1,12 +1,13 @@
+// src/main.rs
 mod config;
 mod core;
 mod adapters;
 mod api;
-mod telemetry; // YENİ
+mod telemetry; 
 
 use std::{sync::Arc, collections::HashMap, time::Duration};
 use tokio::sync::{Mutex, broadcast};
-use tracing::{info, error, warn, debug}; 
+use tracing::info; 
 use tracing_subscriber::{fmt, prelude::*, EnvFilter, Registry};
 use bollard::container::ListContainersOptions;
 use reqwest::Client;
@@ -35,12 +36,10 @@ pub struct AppState {
 async fn main() -> anyhow::Result<()> {
     let cfg = AppConfig::load();
 
-    // --- SUTS v4.0 LOGGING SETUP ---
     let rust_log_env = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
     let env_filter = EnvFilter::try_from_default_env().or_else(|_| EnvFilter::try_new(&rust_log_env))?;
     let subscriber = Registry::default().with(env_filter);
     
-    // Config'de log formatı yoksa varsayılan olarak json (prod için) veya text
     let log_format = std::env::var("LOG_FORMAT").unwrap_or_else(|_| "json".to_string());
 
     if log_format == "json" {
@@ -60,7 +59,7 @@ async fn main() -> anyhow::Result<()> {
         service.version = env!("CARGO_PKG_VERSION"),
         node.name = %cfg.node_name,
         mode = if cfg.upstream_url.is_some() { "EDGE" } else { "MASTER" },
-        "💠 SENTIRIC ORCHESTRATOR v5.4 (HIVE MIND) Booting..."
+        "💠 SENTIRIC ORCHESTRATOR v5.5 (OPTIMIZED) Booting..."
     );
 
     let (tx, _) = broadcast::channel::<String>(100);
@@ -89,21 +88,10 @@ async fn main() -> anyhow::Result<()> {
     tokio::spawn(async move {
         loop {
             let stats = sys_mon.snapshot();
-            
-            // [SUTS]: Periyodik metrik logu (Sadece önemli değişimlerde loglanabilir, şimdilik debug)
-            debug!(
-                event = "SYSTEM_METRICS_COLLECTED",
-                cpu.usage = stats.cpu_usage,
-                ram.used_mb = stats.ram_used,
-                gpu.usage = stats.gpu_usage,
-                "Sistem metrikleri toplandı"
-            );
-
             let mut node_cache = mon_state.node_stats_cache.lock().await;
             *node_cache = stats.clone();
             drop(node_cache);
 
-            // Local veriyi cluster cache'e ekle
             let svcs = mon_state.services_cache.lock().await.values().cloned().collect();
             let report = ClusterReport {
                 node: mon_node.clone(),
@@ -113,8 +101,6 @@ async fn main() -> anyhow::Result<()> {
             };
             
             mon_state.cluster_cache.lock().await.insert(mon_node.clone(), report);
-            
-            // Cluster update gönder
             let cluster_map = mon_state.cluster_cache.lock().await.clone();
             let _ = mon_tx.send(serde_json::json!({ "type": "cluster_update", "data": cluster_map }).to_string());
             
@@ -122,27 +108,28 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    // 2. DOCKER SCAN
+    // 2. DOCKER SCAN (CPU OPTIMIZED)
     let scan_state = state.clone();
     let scan_node = cfg.node_name.clone();
-    let poll_interval = cfg.poll_interval;
+    
+    // CPU Throttling Mantığı: poll_interval config'den okunur (Örn: 5sn).
+    // Durum kontrolleri 5sn'de bir, ağır istatistik kontrolleri 15sn'de bir (5*3).
+    let poll_interval = cfg.poll_interval; 
 
     tokio::spawn(async move {
         let client = scan_state.docker.get_client();
-        let mut tick_count = 0;
-        let update_check_ticks = 12; 
+        let mut loop_counter = 0;
         let mut cpu_cache: HashMap<String, CpuStatsCache> = HashMap::new();
 
         loop {
-            tick_count += 1;
-            let do_update_check = tick_count >= update_check_ticks;
-            if do_update_check { tick_count = 0; }
+            loop_counter += 1;
+            let fetch_heavy_metrics = loop_counter % 3 == 0; // Her 3 döngüde bir ağır okuma
+            let do_update_check = loop_counter % 12 == 0; // Her 12 döngüde bir registry kontrolü (60sn)
 
             match client.list_containers(Some(ListContainersOptions::<String> { all: true, ..Default::default() })).await {
                 Ok(containers) => {
                     let ap_guard = scan_state.auto_pilot_config.lock().await;
                     let mut cache = scan_state.services_cache.lock().await;
-                    let mut list = Vec::new();
 
                     for c in containers {
                         let name = c.names.unwrap_or_default().first().cloned().unwrap_or_default().replace("/", "");
@@ -150,36 +137,44 @@ async fn main() -> anyhow::Result<()> {
 
                         let is_auto_pilot = *ap_guard.get(&name).unwrap_or(&false);
                         let container_id = c.id.clone().unwrap_or_default();
-                        
+                        let status_str = c.status.unwrap_or_default();
+                        let is_up = status_str.to_lowercase().contains("up");
+
                         let mut cpu_percent = 0.0;
                         let mut mem_usage_mb = 0;
+                        
+                        if let Some(existing) = cache.get(&name) {
+                            cpu_percent = existing.cpu_usage;
+                            mem_usage_mb = existing.mem_usage;
+                        }
 
-                        if c.status.clone().unwrap_or_default().to_lowercase().contains("up") {
-                            match scan_state.docker.get_container_stats(&container_id).await {
-                                Ok(stats) => {
-                                    let mem = &stats.memory_stats;
-                                    mem_usage_mb = mem.usage.unwrap_or(0) / 1024 / 1024;
-                                    let cpu = &stats.cpu_stats;
-                                    let pre_cpu = &stats.precpu_stats;
-                                    let cpu_total = cpu.cpu_usage.total_usage;
-                                    let system_total = cpu.system_cpu_usage.unwrap_or(0);
-                                    let (prev_cpu_total, prev_system_total) = if let Some(cached) = cpu_cache.get(&container_id) {
-                                        (cached.cpu_usage, cached.system_usage)
-                                    } else {
-                                        (pre_cpu.cpu_usage.total_usage, pre_cpu.system_cpu_usage.unwrap_or(0))
-                                    };
-                                    if system_total > prev_system_total && cpu_total > prev_cpu_total {
-                                        let cpu_delta = (cpu_total - prev_cpu_total) as f64;
-                                        let system_delta = (system_total - prev_system_total) as f64;
-                                        let online_cpus = cpu.online_cpus.unwrap_or(1) as f64;
-                                        if system_delta > 0.0 { cpu_percent = (cpu_delta / system_delta) * online_cpus * 100.0; }
-                                    }
-                                    cpu_cache.insert(container_id.clone(), CpuStatsCache { cpu_usage: cpu_total, system_usage: system_total });
-                                },
-                                Err(_) => { }
+                        if is_up && fetch_heavy_metrics {
+                            if let Ok(stats) = scan_state.docker.get_container_stats(&container_id).await {
+                                let mem = &stats.memory_stats;
+                                mem_usage_mb = mem.usage.unwrap_or(0) / 1024 / 1024;
+                                let cpu = &stats.cpu_stats;
+                                let pre_cpu = &stats.precpu_stats;
+                                let cpu_total = cpu.cpu_usage.total_usage;
+                                let system_total = cpu.system_cpu_usage.unwrap_or(0);
+                                
+                                let (prev_cpu_total, prev_system_total) = if let Some(cached) = cpu_cache.get(&container_id) {
+                                    (cached.cpu_usage, cached.system_usage)
+                                } else {
+                                    (pre_cpu.cpu_usage.total_usage, pre_cpu.system_cpu_usage.unwrap_or(0))
+                                };
+                                
+                                if system_total > prev_system_total && cpu_total > prev_cpu_total {
+                                    let cpu_delta = (cpu_total - prev_cpu_total) as f64;
+                                    let system_delta = (system_total - prev_system_total) as f64;
+                                    let online_cpus = cpu.online_cpus.unwrap_or(1) as f64;
+                                    if system_delta > 0.0 { cpu_percent = (cpu_delta / system_delta) * online_cpus * 100.0; }
+                                }
+                                cpu_cache.insert(container_id.clone(), CpuStatsCache { cpu_usage: cpu_total, system_usage: system_total });
                             }
-                        } else {
+                        } else if !is_up {
                             cpu_cache.remove(&container_id);
+                            cpu_percent = 0.0;
+                            mem_usage_mb = 0;
                         }
 
                         if is_auto_pilot && do_update_check {
@@ -191,31 +186,24 @@ async fn main() -> anyhow::Result<()> {
                             });
                         }
 
-                        // GEÇİÇİ GPU TESPİTİ
-                        let mut has_gpu = false;
-                        if name.contains("llm") || name.contains("ocr") || name.contains("cuda") || name.contains("diffusion") {
-                            has_gpu = true;
-                        }
+                        let has_gpu = name.contains("llm") || name.contains("ocr") || name.contains("cuda") || name.contains("diffusion");
 
                         let svc = ServiceInstance {
                             name: name.clone(),
                             image: c.image.unwrap_or_default(),
-                            status: c.status.unwrap_or_default(),
+                            status: status_str,
                             short_id: container_id.chars().take(12).collect(),
                             auto_pilot: is_auto_pilot,
                             node: scan_node.clone(),
                             cpu_usage: cpu_percent,
                             mem_usage: mem_usage_mb,
-                            has_gpu: has_gpu, 
+                            has_gpu, 
                         };
                         
-                        cache.insert(name, svc.clone());
-                        list.push(svc);
+                        cache.insert(name, svc);
                     }
                 }
-                Err(e) => { 
-                    error!(event="DOCKER_LIST_ERROR", error=%e, "Docker konteyner listesi alınamadı"); 
-                }
+                Err(_) => { } // Hata sessizce atlanır, e2-micro'da geçici tıkanmalar olabilir
             }
             tokio::time::sleep(Duration::from_secs(poll_interval)).await;
         }
@@ -234,23 +222,12 @@ async fn main() -> anyhow::Result<()> {
                 let stats: NodeStats = up_state.node_stats_cache.lock().await.clone();
                 let payload = ClusterReport {
                     node: node_name.clone(),
-                    stats: stats,
+                    stats,
                     services: svcs,
                     timestamp: chrono::Utc::now().to_rfc3339()
                 };
 
-                match http_client.post(&upstream_url).json(&payload).send().await {
-                    Ok(resp) => { 
-                        if !resp.status().is_success() { 
-                            warn!(event="UPSTREAM_SYNC_FAIL", status=%resp.status(), "Rapor gönderilemedi"); 
-                        } else {
-                            debug!(event="UPSTREAM_SYNC_SUCCESS", "Rapor başarıyla gönderildi");
-                        }
-                    },
-                    Err(e) => { 
-                        warn!(event="UPSTREAM_UNREACHABLE", error=%e, "Merkezi sunucuya ulaşılamıyor"); 
-                    }
-                }
+                let _ = http_client.post(&upstream_url).json(&payload).send().await;
                 tokio::time::sleep(Duration::from_secs(10)).await;
             }
         });

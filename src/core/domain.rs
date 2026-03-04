@@ -1,6 +1,5 @@
 // src/core/domain.rs
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ServiceInstance {
@@ -47,7 +46,7 @@ pub struct ToggleParams {
     pub enabled: bool 
 }
 
-// --- YENİ: TOPOLOJİ MODELLERİ ---
+// --- TOPOLOJİ MODELLERİ ---
 #[derive(Serialize, Clone, Debug)]
 pub struct TopologyNode {
     pub id: String,
