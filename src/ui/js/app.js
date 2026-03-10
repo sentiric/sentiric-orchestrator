@@ -92,10 +92,29 @@ const ui = {
 
         document.getElementById('btn-export').onclick = async () => {
             const res = await fetch('/api/export/llm');
-            const text = await res.text();
+            let text = await res.text();
+            
+            // [YENİ EKLENEN]: Zaman Çizelgeli (Time-Series) CPU/RAM Geçmişini Rapora Ekleme
+            text += "\n\n## 4. TIME-SERIES RESOURCE HISTORY (Last 40 Ticks)\n";
+            text += "Bu tablo, servislerin zaman içindeki CPU ve RAM trendlerini gösterir. 'Memory Leak' veya 'CPU Spike' analizi için kullanın.\n\n";
+            
+            const history = window.Store.state.history;
+            for (const [id, data] of Object.entries(history)) {
+                // id formatı: "gcp-iowa-gw-01_proxy-service"
+                const cleanId = id.split('_').join(' -> ');
+                
+                // RAM değerlerini virgülle ayırarak tek satırda göster
+                const ramLine = data.ram.map(v => `${v}MB`).join(' -> ');
+                const cpuLine = data.cpu.map(v => `${v.toFixed(1)}%`).join(' -> ');
+                
+                text += `### Service: ${cleanId}\n`;
+                text += `- **RAM Trend:** [ ${ramLine} ]\n`;
+                text += `- **CPU Trend:** [ ${cpuLine} ]\n\n`;
+            }
+
             const a = document.createElement('a');
             a.href = window.URL.createObjectURL(new Blob([text], {type:'text/markdown'}));
-            a.download = `nexus_report_${Date.now()}.md`;
+            a.download = `nexus_diagnostic_${Date.now()}.md`;
             a.click();
         };
     },
