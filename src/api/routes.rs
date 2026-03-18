@@ -1,4 +1,4 @@
-// src/api/routes.rs
+// Dosya: src/api/routes.rs
 use axum::{
     extract::{State, Query, Path, ws::{Message, WebSocket, WebSocketUpgrade}},
     response::{Html, IntoResponse, Response},
@@ -6,7 +6,8 @@ use axum::{
     http::StatusCode,
     Json, Router,
 };
-use tower_http::services::ServeDir; // KRİTİK EKLENTİ
+use tower_http::services::ServeDir; 
+use tower_http::trace::TraceLayer; // [ARCH-COMPLIANCE] İçeri eklendi
 use std::sync::Arc;
 use crate::core::domain::{ActionParams, ToggleParams, ClusterReport, ServiceInstance, TopologyMap, TopologyNode, TopologyEdge};
 use crate::AppState;
@@ -16,10 +17,7 @@ use tracing::info;
 pub fn create_router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/", get(index_handler))
-        
-        // KRİTİK DÜZELTME: Tüm UI klasörünü otomatik MIME Type desteği ile açıyoruz
         .nest_service("/ui", ServeDir::new("src/ui"))
-        
         .route("/ws", get(ws_handler))
         .route("/ws/logs/:id", get(ws_logs_handler))
         
@@ -37,6 +35,8 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/ingest/report", post(ingest_report_handler))
         
         .with_state(state)
+        // [ARCH-COMPLIANCE] constraints.yaml'ın gerektirdiği şekilde HTTP trace/bağlam takibi eklendi
+        .layer(TraceLayer::new_for_http())
 }
 
 // Ana sayfa artık dosyadan okunacak

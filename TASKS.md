@@ -1,0 +1,1 @@
+- [x] observability.tracing mimari kısıtlamasına uyum sağlamak üzere Axum API'si ve giden reqwest HTTP istekleri TraceLayer ve Custom Header aracılığıyla bağlam (context) yayılımına dahil edildi.

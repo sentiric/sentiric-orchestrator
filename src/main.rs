@@ -1,4 +1,4 @@
-// src/main.rs
+// Dosya: src/main.rs
 mod config;
 mod core;
 mod adapters;
@@ -111,9 +111,6 @@ async fn main() -> anyhow::Result<()> {
     // 2. DOCKER SCAN (CPU OPTIMIZED)
     let scan_state = state.clone();
     let scan_node = cfg.node_name.clone();
-    
-    // CPU Throttling Mantığı: poll_interval config'den okunur (Örn: 5sn).
-    // Durum kontrolleri 5sn'de bir, ağır istatistik kontrolleri 15sn'de bir (5*3).
     let poll_interval = cfg.poll_interval; 
 
     tokio::spawn(async move {
@@ -123,8 +120,8 @@ async fn main() -> anyhow::Result<()> {
 
         loop {
             loop_counter += 1;
-            let fetch_heavy_metrics = loop_counter % 3 == 0; // Her 3 döngüde bir ağır okuma
-            let do_update_check = loop_counter % 12 == 0; // Her 12 döngüde bir registry kontrolü (60sn)
+            let fetch_heavy_metrics = loop_counter % 3 == 0; 
+            let do_update_check = loop_counter % 12 == 0; 
 
             match client.list_containers(Some(ListContainersOptions::<String> { all: true, ..Default::default() })).await {
                 Ok(containers) => {
@@ -203,7 +200,7 @@ async fn main() -> anyhow::Result<()> {
                         cache.insert(name, svc);
                     }
                 }
-                Err(_) => { } // Hata sessizce atlanır, e2-micro'da geçici tıkanmalar olabilir
+                Err(_) => { } 
             }
             tokio::time::sleep(Duration::from_secs(poll_interval)).await;
         }
@@ -227,7 +224,15 @@ async fn main() -> anyhow::Result<()> {
                     timestamp: chrono::Utc::now().to_rfc3339()
                 };
 
-                let _ = http_client.post(&upstream_url).json(&payload).send().await;
+                // [ARCH-COMPLIANCE] constraints.yaml'ın gerektirdiği şekilde bağlam yayılımı (trace_id) eklendi
+                let trace_id = format!("tr-{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_micros());
+                let _span = tracing::info_span!("upstream_push", trace_id = %trace_id).entered();
+
+                let _ = http_client.post(&upstream_url)
+                    .header("x-trace-id", &trace_id)
+                    .json(&payload)
+                    .send()
+                    .await;
                 tokio::time::sleep(Duration::from_secs(10)).await;
             }
         });
