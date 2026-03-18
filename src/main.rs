@@ -8,6 +8,7 @@ mod telemetry;
 use std::{sync::Arc, collections::HashMap, time::Duration};
 use tokio::sync::{Mutex, broadcast};
 use tracing::info; 
+use tracing::Instrument; // [ARCH-COMPLIANCE] Future'ları instrument etmek için trait
 use tracing_subscriber::{fmt, prelude::*, EnvFilter, Registry};
 use bollard::container::ListContainersOptions;
 use reqwest::Client;
@@ -224,15 +225,19 @@ async fn main() -> anyhow::Result<()> {
                     timestamp: chrono::Utc::now().to_rfc3339()
                 };
 
-                // [ARCH-COMPLIANCE] constraints.yaml'ın gerektirdiği şekilde bağlam yayılımı (trace_id) eklendi
+                // [ARCH-COMPLIANCE] constraints.yaml gereği mTLS/tracing kuralları uygulanır.
+                // .entered() kullanıldığında "future is not Send" hatası veriyordu.
+                // Çözüm olarak tracing::Instrument kullanılarak scope daraltıldı.
                 let trace_id = format!("tr-{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_micros());
-                let _span = tracing::info_span!("upstream_push", trace_id = %trace_id).entered();
+                let span = tracing::info_span!("upstream_push", trace_id = %trace_id);
 
                 let _ = http_client.post(&upstream_url)
                     .header("x-trace-id", &trace_id)
                     .json(&payload)
                     .send()
+                    .instrument(span) // Span'i yalnızca await olan işlemde aktif tutar, Send güvenliğini sağlar.
                     .await;
+                
                 tokio::time::sleep(Duration::from_secs(10)).await;
             }
         });
