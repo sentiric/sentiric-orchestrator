@@ -7,7 +7,7 @@ use axum::{
     Json, Router,
 };
 use tower_http::services::ServeDir; 
-use tower_http::trace::TraceLayer; // [ARCH-COMPLIANCE] Tracing kısıtı için içeri eklendi
+use tower_http::trace::TraceLayer;
 use std::sync::Arc;
 use crate::core::domain::{ActionParams, ToggleParams, ClusterReport, ServiceInstance, TopologyMap, TopologyNode, TopologyEdge};
 use crate::AppState;
@@ -21,7 +21,6 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/ws", get(ws_handler))
         .route("/ws/logs/:id", get(ws_logs_handler))
         
-        // API
         .route("/api/status", get(status_handler))
         .route("/api/topology", get(topology_handler))
         .route("/api/update", post(update_handler))
@@ -35,11 +34,9 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/ingest/report", post(ingest_report_handler))
         
         .with_state(state)
-        // [ARCH-COMPLIANCE] HTTP istekleri için TraceId ve metrik takibi (constraints.yaml tracing)
         .layer(TraceLayer::new_for_http())
 }
 
-// Ana sayfa artık dosyadan okunacak
 async fn index_handler() -> impl IntoResponse {
     match std::fs::read_to_string("src/ui/index.html") {
         Ok(html) => Html(html),
@@ -47,50 +44,68 @@ async fn index_handler() -> impl IntoResponse {
     }
 }
 
-// --- SENTIRIC ANAYASAL TOPOLOJİSİ ---
+// --- [ARCH-COMPLIANCE] TOPOLOJİ ONARILDI VE SPAGETTİ ÖNLENDİ ---
 async fn topology_handler() -> Json<TopologyMap> {
     let nodes = vec![
-        TopologyNode { id: "sbc-service".into(), label: "SBC\n(Edge)".into(), group: "edge".into() },
-        TopologyNode { id: "proxy-service".into(), label: "Proxy\n(Router)".into(), group: "telecom".into() },
-        TopologyNode { id: "b2bua-service".into(), label: "B2BUA\n(Session)".into(), group: "telecom".into() },
-        TopologyNode { id: "registrar-service".into(), label: "Registrar\n(Location)".into(), group: "telecom".into() },
+        // Edge & Telecom (sip- ön ekleri güncellendi)
+        TopologyNode { id: "sip-sbc-service".into(), label: "SBC\n(Edge)".into(), group: "edge".into() },
+        TopologyNode { id: "sip-proxy-service".into(), label: "Proxy\n(Router)".into(), group: "telecom".into() },
+        TopologyNode { id: "sip-b2bua-service".into(), label: "B2BUA\n(Session)".into(), group: "telecom".into() },
+        TopologyNode { id: "sip-registrar-service".into(), label: "Registrar\n(Location)".into(), group: "telecom".into() },
         TopologyNode { id: "media-service".into(), label: "Media\n(RTP Engine)".into(), group: "telecom".into() },
+        
+        // Core Logic
         TopologyNode { id: "dialplan-service".into(), label: "Dialplan\n(Routing)".into(), group: "core".into() },
         TopologyNode { id: "user-service".into(), label: "User\n(Identity)".into(), group: "core".into() },
         TopologyNode { id: "workflow-service".into(), label: "Workflow\n(Cortex)".into(), group: "core".into() },
         TopologyNode { id: "agent-service".into(), label: "Agent\n(Orchestrator)".into(), group: "core".into() },
+        TopologyNode { id: "telephony-action-service".into(), label: "TAS\n(Pipeline)".into(), group: "core".into() },
+        TopologyNode { id: "dialog-service".into(), label: "Dialog\n(Memory)".into(), group: "core".into() },
+        
+        // AI Gateways
         TopologyNode { id: "stt-gateway-service".into(), label: "STT\nGateway".into(), group: "ai".into() },
         TopologyNode { id: "tts-gateway-service".into(), label: "TTS\nGateway".into(), group: "ai".into() },
         TopologyNode { id: "llm-gateway-service".into(), label: "LLM\nGateway".into(), group: "ai".into() },
+        
+        // Infra
         TopologyNode { id: "rabbitmq".into(), label: "RabbitMQ\n(Event Bus)".into(), group: "infra".into() },
         TopologyNode { id: "redis".into(), label: "Redis\n(State)".into(), group: "infra".into() },
         TopologyNode { id: "postgres".into(), label: "Postgres\n(Data)".into(), group: "infra".into() },
     ];
 
     let edges = vec![
-        TopologyEdge { from: "sbc-service".into(), to: "proxy-service".into(), label: "SIP".into(), dashes: false },
-        TopologyEdge { from: "proxy-service".into(), to: "b2bua-service".into(), label: "SIP".into(), dashes: false },
-        TopologyEdge { from: "proxy-service".into(), to: "registrar-service".into(), label: "gRPC".into(), dashes: false },
-        TopologyEdge { from: "proxy-service".into(), to: "dialplan-service".into(), label: "gRPC".into(), dashes: false },
-        TopologyEdge { from: "b2bua-service".into(), to: "media-service".into(), label: "gRPC".into(), dashes: false },
-        TopologyEdge { from: "b2bua-service".into(), to: "rabbitmq".into(), label: "AMQP".into(), dashes: false },
-        TopologyEdge { from: "b2bua-service".into(), to: "redis".into(), label: "TCP".into(), dashes: false },
-        TopologyEdge { from: "b2bua-service".into(), to: "dialplan-service".into(), label: "gRPC".into(), dashes: false },
-        TopologyEdge { from: "registrar-service".into(), to: "redis".into(), label: "TCP".into(), dashes: false },
-        TopologyEdge { from: "registrar-service".into(), to: "user-service".into(), label: "gRPC".into(), dashes: false },
+        // Telecom Akışı (Ana Damar - Düz Çizgi)
+        TopologyEdge { from: "sip-sbc-service".into(), to: "sip-proxy-service".into(), label: "SIP".into(), dashes: false },
+        TopologyEdge { from: "sip-proxy-service".into(), to: "sip-b2bua-service".into(), label: "SIP".into(), dashes: false },
+        TopologyEdge { from: "sip-proxy-service".into(), to: "sip-registrar-service".into(), label: "gRPC".into(), dashes: false },
+        TopologyEdge { from: "sip-proxy-service".into(), to: "dialplan-service".into(), label: "gRPC".into(), dashes: false },
+        TopologyEdge { from: "sip-b2bua-service".into(), to: "media-service".into(), label: "gRPC".into(), dashes: false },
+        TopologyEdge { from: "sip-b2bua-service".into(), to: "dialplan-service".into(), label: "gRPC".into(), dashes: false },
+        
+        // Infra Bağlantıları (Karmaşayı önlemek için Kesikli Çizgi [dashes: true])
+        TopologyEdge { from: "sip-b2bua-service".into(), to: "rabbitmq".into(), label: "AMQP".into(), dashes: true },
+        TopologyEdge { from: "sip-b2bua-service".into(), to: "redis".into(), label: "TCP".into(), dashes: true },
+        TopologyEdge { from: "sip-registrar-service".into(), to: "redis".into(), label: "TCP".into(), dashes: true },
+        TopologyEdge { from: "sip-registrar-service".into(), to: "user-service".into(), label: "gRPC".into(), dashes: false },
         TopologyEdge { from: "dialplan-service".into(), to: "user-service".into(), label: "gRPC".into(), dashes: false },
-        TopologyEdge { from: "dialplan-service".into(), to: "postgres".into(), label: "TCP".into(), dashes: false },
-        TopologyEdge { from: "user-service".into(), to: "postgres".into(), label: "TCP".into(), dashes: false },
-        TopologyEdge { from: "rabbitmq".into(), to: "workflow-service".into(), label: "AMQP".into(), dashes: false },
-        TopologyEdge { from: "workflow-service".into(), to: "postgres".into(), label: "TCP".into(), dashes: false },
-        TopologyEdge { from: "workflow-service".into(), to: "redis".into(), label: "TCP".into(), dashes: false },
-        TopologyEdge { from: "workflow-service".into(), to: "media-service".into(), label: "gRPC".into(), dashes: true },
+        TopologyEdge { from: "dialplan-service".into(), to: "postgres".into(), label: "TCP".into(), dashes: true },
+        TopologyEdge { from: "user-service".into(), to: "postgres".into(), label: "TCP".into(), dashes: true },
+        
+        // Workflow & Agent
+        TopologyEdge { from: "rabbitmq".into(), to: "workflow-service".into(), label: "AMQP".into(), dashes: true },
+        TopologyEdge { from: "workflow-service".into(), to: "postgres".into(), label: "TCP".into(), dashes: true },
+        TopologyEdge { from: "workflow-service".into(), to: "redis".into(), label: "TCP".into(), dashes: true },
+        TopologyEdge { from: "workflow-service".into(), to: "media-service".into(), label: "gRPC".into(), dashes: false },
         TopologyEdge { from: "workflow-service".into(), to: "agent-service".into(), label: "gRPC".into(), dashes: false },
-        TopologyEdge { from: "workflow-service".into(), to: "b2bua-service".into(), label: "gRPC".into(), dashes: true },
-        TopologyEdge { from: "agent-service".into(), to: "stt-gateway-service".into(), label: "gRPC".into(), dashes: false },
-        TopologyEdge { from: "agent-service".into(), to: "tts-gateway-service".into(), label: "gRPC".into(), dashes: false },
-        TopologyEdge { from: "agent-service".into(), to: "llm-gateway-service".into(), label: "gRPC".into(), dashes: false },
-        TopologyEdge { from: "agent-service".into(), to: "redis".into(), label: "TCP".into(), dashes: false },
+        TopologyEdge { from: "workflow-service".into(), to: "sip-b2bua-service".into(), label: "gRPC".into(), dashes: false },
+        
+        // AI Pipeline
+        TopologyEdge { from: "agent-service".into(), to: "telephony-action-service".into(), label: "gRPC".into(), dashes: false },
+        TopologyEdge { from: "agent-service".into(), to: "redis".into(), label: "TCP".into(), dashes: true },
+        TopologyEdge { from: "telephony-action-service".into(), to: "stt-gateway-service".into(), label: "gRPC".into(), dashes: false },
+        TopologyEdge { from: "telephony-action-service".into(), to: "tts-gateway-service".into(), label: "gRPC".into(), dashes: false },
+        TopologyEdge { from: "telephony-action-service".into(), to: "dialog-service".into(), label: "gRPC".into(), dashes: false },
+        TopologyEdge { from: "dialog-service".into(), to: "llm-gateway-service".into(), label: "gRPC".into(), dashes: false },
     ];
 
     Json(TopologyMap { nodes, edges })
