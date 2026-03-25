@@ -49,10 +49,11 @@ struct ResourceContext {
 
 pub struct SutsFormatter {
     resource: ResourceContext,
+    tenant_id: String, //[ARCH-COMPLIANCE] Dinamik tenant_id
 }
 
 impl SutsFormatter {
-    pub fn new(service_name: String, version: String, env: String, host_name: String) -> Self {
+    pub fn new(service_name: String, version: String, env: String, host_name: String, tenant_id: String) -> Self {
         Self {
             resource: ResourceContext {
                 service_name,
@@ -60,6 +61,7 @@ impl SutsFormatter {
                 service_env: env,
                 host_name,
             },
+            tenant_id,
         }
     }
 }
@@ -105,7 +107,7 @@ where
             schema_v: "1.0.0",
             ts,
             severity,
-            tenant_id: "system".to_string(), // Orchestrator bir sistem bileşenidir
+            tenant_id: self.tenant_id.clone(), // [ARCH-COMPLIANCE] Hardcoded değer kaldırıldı
             resource: self.resource.clone(),
             trace_id,
             span_id: None,

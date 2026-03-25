@@ -8,7 +8,7 @@ mod telemetry;
 use std::{sync::Arc, collections::HashMap, time::Duration};
 use tokio::sync::{Mutex, broadcast};
 use tracing::info; 
-use tracing::Instrument; // [ARCH-COMPLIANCE] Future'ları instrument etmek için trait
+use tracing::Instrument; 
 use tracing_subscriber::{fmt, prelude::*, EnvFilter, Registry};
 use bollard::container::ListContainersOptions;
 use reqwest::Client;
@@ -44,11 +44,13 @@ async fn main() -> anyhow::Result<()> {
     let log_format = std::env::var("LOG_FORMAT").unwrap_or_else(|_| "json".to_string());
 
     if log_format == "json" {
+        // [ARCH-COMPLIANCE] tenant_id formatter'a enjekte edildi
         let suts_formatter = SutsFormatter::new(
             "orchestrator-service".to_string(),
             env!("CARGO_PKG_VERSION").to_string(),
             cfg.env.clone(),
             cfg.node_name.clone(),
+            cfg.tenant_id.clone(), 
         );
         subscriber.with(fmt::layer().event_format(suts_formatter)).init();
     } else {
@@ -225,9 +227,6 @@ async fn main() -> anyhow::Result<()> {
                     timestamp: chrono::Utc::now().to_rfc3339()
                 };
 
-                // [ARCH-COMPLIANCE] constraints.yaml gereği mTLS/tracing kuralları uygulanır.
-                // .entered() kullanıldığında "future is not Send" hatası veriyordu.
-                // Çözüm olarak tracing::Instrument kullanılarak scope daraltıldı.
                 let trace_id = format!("tr-{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_micros());
                 let span = tracing::info_span!("upstream_push", trace_id = %trace_id);
 
@@ -235,7 +234,7 @@ async fn main() -> anyhow::Result<()> {
                     .header("x-trace-id", &trace_id)
                     .json(&payload)
                     .send()
-                    .instrument(span) // Span'i yalnızca await olan işlemde aktif tutar, Send güvenliğini sağlar.
+                    .instrument(span) 
                     .await;
                 
                 tokio::time::sleep(Duration::from_secs(10)).await;

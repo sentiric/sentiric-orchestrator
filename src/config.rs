@@ -11,6 +11,8 @@ pub struct AppConfig {
     pub poll_interval: u64,
     pub auto_pilot_services: Vec<String>,
     pub upstream_url: Option<String>,
+    // [ARCH-COMPLIANCE] Tenant ID zorunluluğu eklendi
+    pub tenant_id: String,
 }
 
 impl AppConfig {
@@ -23,6 +25,12 @@ impl AppConfig {
             
         let upstream = env::var("UPSTREAM_ORCHESTRATOR_URL").ok()
             .filter(|s| !s.trim().is_empty());
+
+        // [ARCH-COMPLIANCE] Tenant izolasyon kuralı: Boş olması YASAKTIR.
+        let tenant_id = env::var("TENANT_ID").unwrap_or_default();
+        if tenant_id.trim().is_empty() {
+            panic!("[ARCH-COMPLIANCE] TENANT_ID ortam değişkeni ZORUNLUDUR ve boş olamaz. Servis başlatılamaz.");
+        }
 
         Self {
             env: env::var("ENV").unwrap_or_else(|_| "production".into()),
@@ -39,6 +47,7 @@ impl AppConfig {
             poll_interval: env::var("POLL_INTERVAL").unwrap_or("5".to_string()).parse().unwrap_or(5),
             auto_pilot_services: ap_list,
             upstream_url: upstream,
+            tenant_id,
         }
     }
 }
