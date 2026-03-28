@@ -13,7 +13,6 @@
 <body>
     <div class="app-wrapper">
         
-        <!-- MOBILE HEADER (Sadece mobilde görünür) -->
         <header class="top-bar mobile-header mobile-only">
             <div style="display:flex; align-items:center; gap:10px;">
                 <button id="mobile-menu-btn" class="icon-btn" style="font-size:20px;">☰</button>
@@ -23,7 +22,6 @@
             <div id="conn-status-mobile" class="conn-status offline">● OFFLINE</div>
         </header>
 
-        <!-- SIDEBAR -->
         <aside class="sidebar" id="sidebar">
             <div class="brand-area desktop-only">
                 <div class="brand-logo">💠</div>
@@ -35,9 +33,7 @@
 
             <div class="cluster-nodes-area">
                 <div class="area-title">CLUSTER NODES</div>
-                <div id="cluster-list" class="node-list">
-                    <!-- Dinamik Düğümler -->
-                </div>
+                <div id="cluster-list" class="node-list"></div>
             </div>
 
             <div class="sidebar-footer">
@@ -47,12 +43,18 @@
                 <div class="mini-stats" style="margin-bottom: 8px;">
                     <span style="font-size:10px; color:#888; width:25px;">CPU</span>
                     <div class="mini-stat-bar"><div id="host-cpu-bar" class="mini-stat-fill cpu" style="width:0%"></div></div>
-                    <span style="font-size:10px; color:#fff; font-family:'JetBrains Mono'; width:35px; text-align:right;" id="host-cpu-val">0%</span>
+                    <span style="font-size:10px; color:#fff; font-family:'JetBrains Mono'; width:45px; text-align:right;" id="host-cpu-val">0%</span>
                 </div>
-                <div class="mini-stats" style="margin-bottom: 20px;">
+                <div class="mini-stats" style="margin-bottom: 8px;">
                     <span style="font-size:10px; color:#888; width:25px;">RAM</span>
                     <div class="mini-stat-bar"><div id="host-ram-bar" class="mini-stat-fill ram" style="width:0%"></div></div>
                     <span style="font-size:10px; color:#fff; font-family:'JetBrains Mono'; width:45px; text-align:right;" id="host-ram-val">0 GB</span>
+                </div>
+                <!-- [YENİ] GPU METRİĞİ EKLENDİ -->
+                <div class="mini-stats" style="margin-bottom: 20px;">
+                    <span style="font-size:10px; color:#888; width:25px;">GPU</span>
+                    <div class="mini-stat-bar"><div id="host-gpu-bar" class="mini-stat-fill gpu" style="width:0%; background:#c084fc;"></div></div>
+                    <span style="font-size:10px; color:#c084fc; font-family:'JetBrains Mono'; width:45px; text-align:right;" id="host-gpu-val">0 GB</span>
                 </div>
 
                 <button id="btn-export" class="btn btn-primary" style="width: 100%;">🤖 AI DIAGNOSTIC EXPORT</button>
@@ -60,9 +62,7 @@
             </div>
         </aside>
 
-        <!-- MAIN AREA -->
         <main class="main-area">
-            <!-- DESKTOP HEADER (Sadece masaüstünde görünür) -->
             <header class="top-bar desktop-only">
                 <div class="view-toggles">
                     <button id="btn-view-grid" class="view-btn active">SERVICES GRID</button>
@@ -74,47 +74,44 @@
                 </div>
             </header>
 
-            <!-- VIEWS WRAPPER -->
             <div class="views-wrapper">
-                
-                <!-- GRID VIEW -->
                 <div id="view-grid" class="view-layer active">
-                    <!-- Mobil için görünüm geçiş butonları -->
                     <div class="mobile-only view-toggles" style="padding:10px 20px; border-bottom:1px solid var(--border-dim); width: 100%; justify-content: center;">
                         <button id="btn-view-grid-mobile" class="view-btn active" style="flex:1;">GRID</button>
                         <button id="btn-view-topology-mobile" class="view-btn" style="flex:1;">MAP</button>
                     </div>
+                    <!-- Services Grid Container -->
                     <div id="services-grid" class="services-grid">
-                        <div style="color:#666; font-family:'JetBrains Mono'; padding: 20px;">Awaiting telemetry from nodes...</div>
+                        <div id="grid-loader" style="color:#666; font-family:'JetBrains Mono'; padding: 20px; grid-column: 1 / -1;">Awaiting telemetry from nodes...</div>
                     </div>
                 </div>
 
-                <!-- TOPOLOGY VIEW -->
                 <div id="view-topology" class="view-layer">
                     <div id="topology-network"></div>
                     <div class="topo-controls">
                         <button id="btn-freeze-physics" class="btn">❄️ FREEZE LAYOUT</button>
                     </div>
                 </div>
-
             </div>
         </main>
     </div>
 
-    <!-- MODAL (LOGS, INSPECT & VIOLATIONS) -->
+    <!-- MODAL -->
     <div id="info-modal" class="modal-overlay">
         <div class="modal-content">
             <div class="modal-header">
                 <div class="modal-tabs">
-                    <button class="tab-btn active" data-target="view-logs">LIVE TERMINAL</button>
-                    <button class="tab-btn" data-target="view-inspect">DOCKER INSPECT</button>
-                    <button class="tab-btn" data-target="view-violations" id="tab-violations" style="display:none; color:var(--accent-red);">⚠️ VIOLATIONS</button>
+                    <button class="tab-btn active" data-target="view-logs" id="tab-logs">LIVE TERMINAL</button>
+                    <button class="tab-btn" data-target="view-inspect" id="tab-inspect">DOCKER INSPECT</button>
+                    <button class="tab-btn" data-target="view-violations" id="tab-violations" style="color:var(--accent-red);">⚠️ VIOLATIONS</button>
                 </div>
                 <button class="icon-btn modal-close" id="btn-modal-close">✕</button>
             </div>
             
             <div id="view-logs" class="modal-view active">
-                <div id="log-output" class="log-container"></div>
+                <!-- Terminal boşken veya bağlanırken gösterilecek statü -->
+                <div id="log-status" style="padding:10px; font-family:monospace; font-size:11px; color:#888;">Connecting to stream...</div>
+                <pre id="log-output" class="log-container"></pre>
             </div>
 
             <div id="view-inspect" class="modal-view">
@@ -127,7 +124,6 @@
         </div>
     </div>
 
-    <!-- App Logic -->
     <script type="module" src="/ui/js/app.js"></script>
 </body>
 </html>

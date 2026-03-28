@@ -1,4 +1,4 @@
-/* src/ui/css/layout.css - NEXUS GOVERNOR v6.1 */
+/* src/ui/css/layout.css - NEXUS GOVERNOR v6.2 (STABLE GRID FIX) */
 
 .app-wrapper {
     display: flex;
@@ -8,7 +8,6 @@
     position: relative;
 }
 
-/* --- RESPONSIVE UTILS (CRITICAL FIX) --- */
 .mobile-only { display: none !important; }
 .desktop-only { display: flex !important; }
 
@@ -19,40 +18,16 @@
 
 /* --- SIDEBAR --- */
 .sidebar {
-    width: 300px;
-    background: var(--bg-panel);
-    border-right: 1px solid var(--border-dim);
-    display: flex;
-    flex-direction: column;
-    flex-shrink: 0;
-    z-index: 1000;
-    transition: transform 0.3s ease;
+    width: 300px; background: var(--bg-panel); border-right: 1px solid var(--border-dim);
+    display: flex; flex-direction: column; flex-shrink: 0; z-index: 1000; transition: transform 0.3s ease;
 }
-
-.brand-area {
-    padding: 24px 20px;
-    align-items: center;
-    gap: 12px;
-    border-bottom: 1px solid var(--border-dim);
-}
+.brand-area { padding: 24px 20px; align-items: center; gap: 12px; border-bottom: 1px solid var(--border-dim); }
 .brand-logo { font-size: 28px; filter: drop-shadow(0 0 8px var(--accent-blue)); }
 .brand-text h1 { font-size: 18px; font-weight: 800; letter-spacing: -0.5px; color: #fff; line-height: 1.1; }
 .brand-text span { font-size: 9px; color: var(--text-muted); font-family: var(--font-mono); letter-spacing: 1px; }
 
-.cluster-nodes-area {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-}
-.area-title {
-    padding: 16px 20px 8px;
-    font-size: 10px;
-    font-weight: 700;
-    color: var(--text-muted);
-    letter-spacing: 1.5px;
-    text-transform: uppercase;
-}
+.cluster-nodes-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.area-title { padding: 16px 20px 8px; font-size: 10px; font-weight: 700; color: var(--text-muted); letter-spacing: 1.5px; text-transform: uppercase; }
 .node-list { flex: 1; overflow-y: auto; padding: 0 10px; }
 
 .node-item {
@@ -84,7 +59,6 @@
     height: 60px; background: var(--bg-surface); border-bottom: 1px solid var(--border-dim);
     justify-content: space-between; align-items: center; padding: 0 24px; flex-shrink: 0;
 }
-
 .view-toggles { display: flex; gap: 12px; }
 .view-btn {
     background: none; border: none; color: var(--text-muted); font-family: var(--font-mono); font-size: 11px; font-weight: 600;
@@ -102,11 +76,19 @@
 .view-layer { position: absolute; inset: 0; display: none; }
 .view-layer.active { display: flex; flex-direction: column; }
 
-/* --- GRID VIEW --- */
-#services-grid {
-    overflow-y: auto; padding: 24px; display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
-    gap: 20px; align-content: start; padding-bottom: 40px; flex: 1;
+/* --- GRID VIEW (SQUISH FIX) --- */
+.services-grid {
+    overflow-y: auto; 
+    padding: 24px; 
+    display: grid;
+    /* Grid sütunları min 340px olacak. */
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    /* KRİTİK: Dikeyde ezilmeyi engeller. İçeriğin boyu kadar yer ayırır. */
+    grid-auto-rows: min-content; 
+    gap: 20px; 
+    align-content: start; 
+    padding-bottom: 40px; 
+    flex: 1;
 }
 
 /* CARDS */
@@ -114,12 +96,15 @@
     background: var(--bg-card); border: 1px solid var(--border-light); border-radius: 8px;
     padding: 20px; display: flex; flex-direction: column; gap: 16px;
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3); position: relative; overflow: hidden;
+    /* KRİTİK: Kartların boyunun belli bir limitin altına düşmesini engeller. */
+    min-height: 290px;
     transition: transform 0.2s, box-shadow 0.2s;
 }
-.service-card:hover { transform: translateY(-2px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5); }
+/* Hover titremesini kesmek için border değişikliklerini sildim, sadece gölge ve transform kalsın */
+.service-card:hover { transform: translateY(-2px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5); z-index: 10;}
 
-/* STATUS BARS (Sol Kenar Çizgisi) */
-.service-card::before { content: ''; position: absolute; top: 0; left: 0; width: 4px; height: 100%; transition: 0.3s; }
+/* STATUS BARS */
+.service-card::before { content: ''; position: absolute; top: 0; left: 0; width: 4px; height: 100%; transition: background-color 0.3s; }
 .service-card.status-online::before { background: var(--accent-green); box-shadow: 0 0 10px var(--accent-green); }
 .service-card.status-offline::before { background: var(--text-muted); }
 .service-card.status-draining::before { background: var(--accent-orange); box-shadow: 0 0 10px var(--accent-orange); animation: blink 2s infinite; }
@@ -145,11 +130,11 @@
 .m-labels .val { font-weight: 700; }
 .val.cpu { color: var(--accent-blue); }
 .val.ram { color: var(--accent-green); }
-
 .sparkline-box { height: 24px; width: 100%; background: #0a0a0a; border-radius: 2px; overflow: hidden; }
 .sparkline-canvas { display: block; width: 100%; height: 100%; }
 
-.svc-actions { display: flex; gap: 8px; margin-top: auto; }
+/* Butonların her zaman kartın en altında kalması için */
+.svc-actions { display: flex; gap: 8px; margin-top: auto; padding-top: 10px;}
 .svc-actions .btn { flex: 1; padding: 8px 0; }
 
 /* --- TOPOLOGY VIEW --- */
@@ -164,7 +149,6 @@
         transform: translateX(-100%); width: 280px;
         box-shadow: 5px 0 15px rgba(0,0,0,0.8);
     }
-    
     .sidebar.open { transform: translateX(0); }
     .services-grid { grid-template-columns: 1fr; padding: 15px; }
     .top-bar.mobile-header { padding: 0 15px; justify-content: space-between;}
