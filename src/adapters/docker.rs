@@ -119,7 +119,7 @@ impl DockerAdapter {
         Ok(msg)
     }
 
-    // --- UPDATE ENGINE ---
+        // --- UPDATE ENGINE (V6.0 GRACEFUL DRAIN) ---
     pub async fn check_and_update_service(&self, svc_name: &str) -> Result<bool> {
         let docker = &self.client;
         let inspect = docker.inspect_container(svc_name, None::<InspectContainerOptions>).await
@@ -140,51 +140,27 @@ impl DockerAdapter {
             "🔍 [{}] Checking updates for image: {}", svc_name, image_name
         );
 
-        // 1. PULL
+        // 1. PULL (Yeni imajı çek)
         let mut stream = docker.create_image(Some(CreateImageOptions { from_image: image_name.clone(), ..Default::default() }), None, None);
         while let Some(res) = stream.next().await {
             if let Err(e) = res { 
-                error!(
-                    event="IMAGE_PULL_FAIL", 
-                    node.name=%self.node_name, 
-                    service=%svc_name, 
-                    error=%e, 
-                    "❌ Pull Error for service [{}] with image [{}]: {}", svc_name, image_name, e
-                );
+                error!(event="IMAGE_PULL_FAIL", error=%e, "❌ Pull Error: {}", e);
                 return Err(anyhow::anyhow!("Registry error")); 
             }
         }
 
-        // 2. COMPARE
+        // 2. COMPARE (Versiyon karşılaştır)
         let new_image_inspect = docker.inspect_image(&image_name).await?;
         let new_image_id = new_image_inspect.id.clone().unwrap_or_default();
 
         if current_image_id == new_image_id { 
-            debug!(
-                event="NO_UPDATE_NEEDED", 
-                node.name=%self.node_name, 
-                service=%svc_name, 
-                "✅ Service [{}] is already running the latest image.", svc_name
-            );
             return Ok(false); 
         }
 
-        info!(
-            event = "AUTO_PILOT_UPDATE_FOUND",
-            node.name = %self.node_name,
-            service = %svc_name,
-            old.sha = %&current_image_id[..12.min(current_image_id.len())],
-            new.sha = %&new_image_id[..12.min(new_image_id.len())],
-            "🚀 UPDATE FOUND for service: [{}]", svc_name
-        );
+        info!(event="AUTO_PILOT_UPDATE_FOUND", service=%svc_name, "🚀 UPDATE FOUND for service: [{}]", svc_name);
 
         if is_self {
-            warn!(
-                event = "SELF_UPDATE_PREVENTED",
-                node.name = %self.node_name,
-                service = %svc_name,
-                "⚠️ SELF-UPDATE PREVENTED: Orchestrator [{}] cannot restart itself autonomously.", svc_name
-            );
+            warn!(event="SELF_UPDATE_PREVENTED", "⚠️ Orchestrator cannot restart itself.");
             return Ok(true); 
         }
 
@@ -199,17 +175,26 @@ impl DockerAdapter {
             ..Default::default()
         };
 
-        info!(event="CONTAINER_RECREATING", node.name=%self.node_name, service=%svc_name, "🛑 Stopping & Removing old container for: [{}]", svc_name);
-        let _ = docker.stop_container(svc_name, Some(StopContainerOptions { t: 10 })).await;
-        let _ = docker.remove_container(svc_name, Some(RemoveContainerOptions { force: true, ..Default::default() })).await;
+        // 3. ZERO-DOWNTIME GRACEFUL SHUTDOWN (Dökülme/Drain)
+        info!(event="CONTAINER_DRAINING", service=%svc_name, "🛑 Sending SIGTERM for graceful drain (Timeout: 1 Hour): [{}]", svc_name);
         
-        info!(event="CONTAINER_CREATING", node.name=%self.node_name, service=%svc_name, "✨ Creating new container for: [{}]", svc_name);
-        docker.create_container(Some(CreateContainerOptions { name: svc_name.to_string(), platform: None }), config).await?;
+        let docker_clone = docker.clone();
+        let svc_name_clone = svc_name.to_string();
         
-        info!(event="CONTAINER_STARTING", node.name=%self.node_name, service=%svc_name, "🚀 Starting new updated container: [{}]", svc_name);
-        docker.start_container(svc_name, None::<StartContainerOptions<String>>).await?;
+        // Asenkron görev olarak başlatıyoruz çünkü 1 saat (3600 sn) bekleyebilir.
+        // Konteyner çağrıları bitince kendi exit(0) yaparsa Docker hemen kapatır.
+        tokio::spawn(async move {
+            let _ = docker_clone.stop_container(&svc_name_clone, Some(StopContainerOptions { t: 3600 })).await;
+            let _ = docker_clone.remove_container(&svc_name_clone, Some(RemoveContainerOptions { force: true, ..Default::default() })).await;
+            
+            info!(event="CONTAINER_DRAIN_COMPLETE", service=%svc_name_clone, "💀 Old container removed. Creating updated one: [{}]", svc_name_clone);
+            
+            if let Ok(_) = docker_clone.create_container(Some(CreateContainerOptions { name: svc_name_clone.clone(), platform: None }), config).await {
+                let _ = docker_clone.start_container(&svc_name_clone, None::<StartContainerOptions<String>>).await;
+                info!(event="AUTO_PILOT_SUCCESS", service=%svc_name_clone, "✅ [{}] updated and started.", svc_name_clone);
+            }
+        });
 
-        info!(event="AUTO_PILOT_SUCCESS", node.name=%self.node_name, service=%svc_name, "✅ [{}] updated successfully.", svc_name);
         Ok(true)
     }
 

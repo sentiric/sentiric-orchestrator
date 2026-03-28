@@ -1,6 +1,15 @@
 // src/core/domain.rs
 use serde::{Deserialize, Serialize};
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub enum HealthStatus {
+    Online,
+    Draining,      // Zero-downtime kapanma sürecinde (Mevcut çağrıları bitiriyor)
+    Quarantined,   // Config Drift / Kurallara uymuyor
+    RiskOom,       // RAM/GPU sınırda
+    Offline,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ServiceInstance {
     pub name: String,
@@ -12,6 +21,10 @@ pub struct ServiceInstance {
     pub cpu_usage: f64,
     pub mem_usage: u64, // MB
     pub has_gpu: bool,
+    
+    // --- V6.0 GOVERNANCE EKLENTİLERİ ---
+    pub health: HealthStatus,
+    pub violations: Vec<String>, // Kurallara uymayan ayarlar
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]

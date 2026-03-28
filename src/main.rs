@@ -3,7 +3,9 @@ mod config;
 mod core;
 mod adapters;
 mod api;
-mod telemetry; 
+mod telemetry;
+
+use crate::core::governor::Governor;
 
 use std::{sync::Arc, collections::HashMap, time::Duration};
 use tokio::sync::{Mutex, broadcast};
@@ -120,11 +122,16 @@ async fn main() -> anyhow::Result<()> {
         let client = scan_state.docker.get_client();
         let mut loop_counter = 0;
         let mut cpu_cache: HashMap<String, CpuStatsCache> = HashMap::new();
+        // Container Inspection Cache (Env değişkenleri sürekli değişmez)
+        let mut env_cache: HashMap<String, Vec<String>> = HashMap::new();
 
         loop {
             loop_counter += 1;
             let fetch_heavy_metrics = loop_counter % 3 == 0; 
             let do_update_check = loop_counter % 12 == 0; 
+
+            // Toplam node RAM bilgisini çek (OOM Guard için)
+            let node_total_ram = scan_state.node_stats_cache.lock().await.ram_total;
 
             match client.list_containers(Some(ListContainersOptions::<String> { all: true, ..Default::default() })).await {
                 Ok(containers) => {
@@ -171,20 +178,27 @@ async fn main() -> anyhow::Result<()> {
                                 }
                                 cpu_cache.insert(container_id.clone(), CpuStatsCache { cpu_usage: cpu_total, system_usage: system_total });
                             }
+                            
                         } else if !is_up {
                             cpu_cache.remove(&container_id);
-                            cpu_percent = 0.0;
-                            mem_usage_mb = 0;
                         }
 
-                        if is_auto_pilot && do_update_check {
-                            let docker_adapter = &scan_state.docker;
-                            let svc_name = name.clone();
-                            let d_adapter = docker_adapter.clone();
-                            tokio::spawn(async move {
-                                let _ = d_adapter.check_and_update_service(&svc_name).await;
-                            });
+                        // --- V6.0 GOVERNOR AUDIT (MÜFETTİŞ DENETİMİ) ---
+                        if !env_cache.contains_key(&container_id) && is_up {
+                            if let Ok(inspect) = client.inspect_container(&container_id, None::<bollard::container::InspectContainerOptions>).await {
+                                if let Some(config) = inspect.config {
+                                    if let Some(env) = config.env {
+                                        env_cache.insert(container_id.clone(), env);
+                                    }
+                                }
+                            }
                         }
+
+                        let env_vars = env_cache.get(&container_id).cloned().unwrap_or_default();
+                        let violations = crate::core::governor::Governor::audit_compliance(&name, &env_vars);
+                        let health = crate::core::governor::Governor::evaluate_health(&status_str, mem_usage_mb, node_total_ram, &violations);
+
+                        // Auto-pilot kontrolü
 
                         let has_gpu = name.contains("llm") || name.contains("ocr") || name.contains("cuda") || name.contains("diffusion");
 
@@ -198,6 +212,8 @@ async fn main() -> anyhow::Result<()> {
                             cpu_usage: cpu_percent,
                             mem_usage: mem_usage_mb,
                             has_gpu, 
+                            health,         // [YENİ]
+                            violations,     // [YENİ]
                         };
                         
                         cache.insert(name, svc);
@@ -205,7 +221,7 @@ async fn main() -> anyhow::Result<()> {
                 }
                 Err(_) => { } 
             }
-            tokio::time::sleep(Duration::from_secs(poll_interval)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(poll_interval)).await;
         }
     });
 
