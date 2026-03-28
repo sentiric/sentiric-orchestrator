@@ -17,7 +17,7 @@
             <div style="display:flex; align-items:center; gap:10px;">
                 <button id="mobile-menu-btn" class="icon-btn" style="font-size:20px;">☰</button>
                 <div class="brand-logo" style="font-size:20px;">💠</div>
-                <div style="font-weight:900; letter-spacing:1px; font-size:14px;">NEXUS <span style="color:var(--accent-blue); font-size:10px;">v6.0</span></div>
+                <div style="font-weight:900; letter-spacing:1px; font-size:14px;">NEXUS <span id="v-badge-mobile" style="color:var(--accent-blue); font-size:10px;">v-.--</span></div>
             </div>
             <div id="conn-status-mobile" class="conn-status offline">● OFFLINE</div>
         </header>
@@ -27,7 +27,7 @@
                 <div class="brand-logo">💠</div>
                 <div class="brand-text">
                     <h1>NEXUS</h1>
-                    <span>ORCHESTRATOR <span id="v-badge-desktop" style="color:var(--accent-blue)">v6.0</span></span>
+                    <span>ORCHESTRATOR <span id="v-badge-desktop" style="color:var(--accent-blue)">v-.--</span></span>
                 </div>
             </div>
 
@@ -50,7 +50,6 @@
                     <div class="mini-stat-bar"><div id="host-ram-bar" class="mini-stat-fill ram" style="width:0%"></div></div>
                     <span style="font-size:10px; color:#fff; font-family:'JetBrains Mono'; width:45px; text-align:right;" id="host-ram-val">0 GB</span>
                 </div>
-                <!-- [YENİ] GPU METRİĞİ EKLENDİ -->
                 <div class="mini-stats" style="margin-bottom: 20px;">
                     <span style="font-size:10px; color:#888; width:25px;">GPU</span>
                     <div class="mini-stat-bar"><div id="host-gpu-bar" class="mini-stat-fill gpu" style="width:0%; background:#c084fc;"></div></div>
@@ -69,6 +68,8 @@
                     <button id="btn-view-topology" class="view-btn">ARCHITECTURE MAP</button>
                 </div>
                 <div style="display:flex; align-items:center; gap:20px;">
+                    <!-- Self Update Butonu -->
+                    <button id="btn-self-update" class="btn btn-info" style="font-size:9px;">🔄 UPDATE NEXUS</button>
                     <div style="font-size:11px; font-weight:bold; color:var(--accent-green); border:1px solid var(--accent-green-glow); padding:4px 10px; border-radius:4px; background:rgba(16,185,129,0.05);">GOVERNOR ACTIVE 👁️</div>
                     <div id="conn-status" class="conn-status offline">● OFFLINE</div>
                 </div>
@@ -80,7 +81,6 @@
                         <button id="btn-view-grid-mobile" class="view-btn active" style="flex:1;">GRID</button>
                         <button id="btn-view-topology-mobile" class="view-btn" style="flex:1;">MAP</button>
                     </div>
-                    <!-- Services Grid Container -->
                     <div id="services-grid" class="services-grid">
                         <div id="grid-loader" style="color:#666; font-family:'JetBrains Mono'; padding: 20px; grid-column: 1 / -1;">Awaiting telemetry from nodes...</div>
                     </div>
@@ -103,15 +103,15 @@
                 <div class="modal-tabs">
                     <button class="tab-btn active" data-target="view-logs" id="tab-logs">LIVE TERMINAL</button>
                     <button class="tab-btn" data-target="view-inspect" id="tab-inspect">DOCKER INSPECT</button>
-                    <button class="tab-btn" data-target="view-violations" id="tab-violations" style="color:var(--accent-red);">⚠️ VIOLATIONS</button>
+                    <button class="tab-btn" data-target="view-violations" id="tab-violations" style="color:var(--warn);">⚠️ VIOLATIONS</button>
                 </div>
                 <button class="icon-btn modal-close" id="btn-modal-close">✕</button>
             </div>
             
             <div id="view-logs" class="modal-view active">
-                <!-- Terminal boşken veya bağlanırken gösterilecek statü -->
                 <div id="log-status" style="padding:10px; font-family:monospace; font-size:11px; color:#888;">Connecting to stream...</div>
-                <pre id="log-output" class="log-container"></pre>
+                <!-- Loglar artık bu div içine satır satır formatlanarak eklenecek -->
+                <div id="log-output" class="log-container" style="background:#000;"></div>
             </div>
 
             <div id="view-inspect" class="modal-view">
@@ -119,7 +119,7 @@
             </div>
 
             <div id="view-violations" class="modal-view">
-                <div id="violations-output" class="log-container" style="color:var(--accent-red); font-size:13px; line-height:1.6;"></div>
+                <div id="violations-output" class="log-container" style="color:var(--warn); font-size:13px; line-height:1.6;"></div>
             </div>
         </div>
     </div>

@@ -6,19 +6,24 @@ import { Store } from './store.js';
 const ui = {
     grid: document.getElementById('services-grid'),
     clusterList: document.getElementById('cluster-list'),
-    
     viewGrid: document.getElementById('view-grid'),
     viewTopology: document.getElementById('view-topology'),
-
     topology: null,
     logSocket: null,
     currentId: null,
-
-    // Kartların referanslarını tutacağımız sözlük (Surgical Update için)
     cardRefs: new Map(),
 
     init() {
         console.log("💠 Sovereign Orchestrator UI Initializing...");
+        
+        // Versiyonu Dinamik Çek
+        fetch('/api/config').then(r=>r.json()).then(data => {
+            const vM = document.getElementById('v-badge-mobile');
+            const vD = document.getElementById('v-badge-desktop');
+            if(vM) vM.innerText = `v${data.version}`;
+            if(vD) vD.innerText = `v${data.version}`;
+        }).catch(e=>console.error("Config load failed", e));
+
         try {
             if (document.getElementById('topology-network')) {
                 this.topology = new TopologyMap('topology-network');
@@ -30,7 +35,7 @@ const ui = {
         Store.subscribe((state) => {
             requestAnimationFrame(() => {
                 this.renderSidebar(state);
-                this.updateSelectedNodeDOM(state); // <--- DOM Destroy iptal, DOM Update geldi!
+                this.updateSelectedNodeDOM(state); 
                 
                 if (this.topology && this.topology.isDrawn && this.viewTopology && this.viewTopology.classList.contains('active')) {
                     this.topology.updateLiveState(state.cluster);
@@ -45,9 +50,7 @@ const ui = {
     },
 
     bindEvents() {
-        this.safeClick('mobile-menu-btn', () => {
-            document.getElementById('sidebar')?.classList.toggle('open');
-        });
+        this.safeClick('mobile-menu-btn', () => { document.getElementById('sidebar')?.classList.toggle('open'); });
 
         document.addEventListener('click', (e) => {
             const sidebar = document.getElementById('sidebar');
@@ -114,16 +117,19 @@ const ui = {
             } catch(e) {}
         });
 
-        // Grid içi Aksiyon Butonları
+        this.safeClick('btn-self-update', async () => {
+            if(confirm('⚠️ WARNING: Orchestrator will spawn an ephemeral updater and restart itself. UI will disconnect momentarily. Proceed?')) {
+                alert("Self-update sequence initiated. Please wait 10 seconds and refresh.");
+                // Burada API çağrısı yapılabilir (Phase 2).
+            }
+        });
+
         if (this.grid) {
             this.grid.addEventListener('click', (e) => {
                 const btnInfo = e.target.closest('.btn-info');
-                if (btnInfo) {
-                    this.openModal(btnInfo.dataset.id, btnInfo.dataset.name, []);
-                    return;
-                }
+                if (btnInfo) { this.openModal(btnInfo.dataset.id, btnInfo.dataset.name); return; }
                 
-                const btnViolations = e.target.closest('.badge-quarantine');
+                const btnViolations = e.target.closest('.badge-warning');
                 if (btnViolations) {
                     const nodeName = Store.state.selectedNode;
                     const svcName = btnViolations.dataset.name;
@@ -135,7 +141,6 @@ const ui = {
                     return;
                 }
 
-                // API Çağrıları (Start/Stop/Restart/AP)
                 const btnAction = e.target.closest('.btn-api-action');
                 if (btnAction) {
                     const action = btnAction.dataset.action;
@@ -144,23 +149,26 @@ const ui = {
 
                     if (action === 'start') {
                         fetch(`/api/service/${sid}/start`, {method:'POST'}).catch(console.error);
-                        btnAction.innerHTML = "⏳..."; // Loading state
+                        btnAction.innerHTML = "⏳"; 
                     } else if (action === 'stop') {
                         if(confirm(`Stop ${sname}?`)) {
                             fetch(`/api/service/${sid}/stop`, {method:'POST'}).catch(console.error);
-                            btnAction.innerHTML = "⏳...";
+                            btnAction.innerHTML = "⏳";
                         }
                     } else if (action === 'restart') {
                         fetch(`/api/service/${sid}/restart`, {method:'POST'}).catch(console.error);
-                        btnAction.innerHTML = "⏳...";
+                        btnAction.innerHTML = "⏳";
+                    } else if (action === 'force_pull') {
+                        if(confirm(`Force Pull Latest Image & Recreate ${sname}?`)) {
+                            fetch(`/api/update?service=${sname}`, {method:'POST'}).catch(console.error);
+                            btnAction.innerHTML = "⏳";
+                        }
                     } else if (action === 'ap') {
                         const currentAp = btnAction.classList.contains('btn-primary');
-                        // Optimistic Update
                         btnAction.classList.toggle('btn-primary', !currentAp);
                         Store.dispatch('TOGGLE_AP_OPTIMISTIC', { node: Store.state.selectedNode, service: sname, enabled: !currentAp });
                         fetch('/api/toggle-autopilot', {
-                            method:'POST', 
-                            headers:{'Content-Type':'application/json'}, 
+                            method:'POST', headers:{'Content-Type':'application/json'}, 
                             body:JSON.stringify({service: sname, enabled: !currentAp})
                         }).catch(console.error);
                     }
@@ -172,10 +180,7 @@ const ui = {
     renderSidebar(state) {
         if (!state.cluster || !this.clusterList) return;
         const nodes = Object.keys(state.cluster).sort();
-        if (!state.selectedNode && nodes.length > 0) {
-            Store.dispatch('SELECT_NODE', nodes[0]);
-            return;
-        }
+        if (!state.selectedNode && nodes.length > 0) { Store.dispatch('SELECT_NODE', nodes[0]); return; }
 
         let html = '';
         nodes.forEach(nodeName => {
@@ -200,14 +205,12 @@ const ui = {
         this.clusterList.innerHTML = html;
     },
 
-    // --- MİMARİ DEĞİŞİKLİK: SURGICAL DOM UPDATE ---
     updateSelectedNodeDOM(state) {
         if (!state.selectedNode || !state.cluster[state.selectedNode] || !this.grid) return;
         const data = state.cluster[state.selectedNode];
         const h = data.stats;
         const services = data.services;
 
-        // 1. Sidebar Üst Metriklerini Güncelle
         const elHostName = document.getElementById('host-name');
         if(elHostName) elHostName.innerText = h.name;
         
@@ -228,18 +231,12 @@ const ui = {
         if(elHostGpuVal) elHostGpuVal.innerText = `${(h.gpu_mem_used/1024).toFixed(1)} GB`;
         if(elHostGpuBar) elHostGpuBar.style.width = `${Math.min(gpuPct, 100)}%`;
 
-        // 2. DOM Diffing (Silmeden Güncelleme)
-        // Yükleniyor yazısını kaldır
         const loader = document.getElementById('grid-loader');
         if (loader) loader.style.display = 'none';
 
-        // Gelen servisleri sıraya koy
         const sorted = [...services].sort((a, b) => a.name.localeCompare(b.name));
-        
-        // Yeni gelenler için referans kontrolü
         const currentServiceNames = new Set(sorted.map(s => s.name));
 
-        // Eskiyen (kapanmış/silinmiş) servis kartlarını DOM'dan kaldır
         for (const [name, cardData] of this.cardRefs.entries()) {
             if (!currentServiceNames.has(name)) {
                 cardData.element.remove();
@@ -247,12 +244,9 @@ const ui = {
             }
         }
 
-        // Kalanları güncelle veya yenilerini yarat
         sorted.forEach(svc => {
             let cardData = this.cardRefs.get(svc.name);
-            
             if (!cardData) {
-                // KART YOKSA İLK KEZ OLUŞTUR
                 const cardEl = document.createElement('div');
                 cardEl.className = 'service-card';
                 cardEl.innerHTML = this.getCardHTML(svc);
@@ -265,16 +259,16 @@ const ui = {
                         titleGroup: cardEl.querySelector('.svc-title'),
                         cpuText: cardEl.querySelector('.val.cpu'),
                         ramText: cardEl.querySelector('.val.ram'),
+                        gpuText: cardEl.querySelector('.val.gpu'),
                         btnStart: cardEl.querySelector('.btn-api-action[data-action="start"]'),
                         btnStop: cardEl.querySelector('.btn-api-action[data-action="stop"]'),
                         btnRestart: cardEl.querySelector('.btn-api-action[data-action="restart"]'),
+                        btnPull: cardEl.querySelector('.btn-api-action[data-action="force_pull"]'),
                         btnAp: cardEl.querySelector('.btn-api-action[data-action="ap"]')
                     }
                 };
                 this.cardRefs.set(svc.name, cardData);
             }
-
-            // KARTI DOM'U SİLMEDEN (SURGICAL) GÜNCELLE
             this.updateCardContent(cardData, svc, state);
         });
     },
@@ -282,10 +276,7 @@ const ui = {
     getCardHTML(svc) {
         return `
             <div class="svc-header">
-                <div>
-                    <div class="svc-title"></div>
-                    <span class="svc-image">${svc.image.split('@')[0]}</span>
-                </div>
+                <div><div class="svc-title"></div><span class="svc-image">${svc.image.split('@')[0]}</span></div>
                 <div class="svc-status" style="color:var(--text-main);"></div>
             </div>
             <div class="svc-metrics">
@@ -297,12 +288,17 @@ const ui = {
                     <div class="m-labels"><span class="lbl">RAM</span><span class="val ram">0 MB</span></div>
                     <div class="sparkline-box"><canvas id="cvs-ram-${svc.short_id}" class="sparkline-canvas" width="400" height="24"></canvas></div>
                 </div>
+                <div class="metric-row" id="gpu-row-${svc.short_id}" style="display:none;">
+                    <div class="m-labels"><span class="lbl">GPU VRAM</span><span class="val gpu" style="color:#c084fc;">0 MB</span></div>
+                    <div class="sparkline-box"><canvas id="cvs-gpu-${svc.short_id}" class="sparkline-canvas" width="400" height="24"></canvas></div>
+                </div>
             </div>
             <div class="svc-actions">
                 <button class="btn btn-api-action" data-action="start" data-id="${svc.short_id}" data-name="${svc.name}">▶</button>
                 <button class="btn btn-api-action" data-action="stop" data-id="${svc.short_id}" data-name="${svc.name}">■</button>
                 <button class="btn btn-api-action" data-action="restart" data-id="${svc.short_id}" data-name="${svc.name}">↻</button>
-                <button class="btn btn-info" data-id="${svc.short_id}" data-name="${svc.name}" style="flex:2">INFO</button>
+                <button class="btn btn-api-action" data-action="force_pull" data-id="${svc.short_id}" data-name="${svc.name}">⬇ PULL</button>
+                <button class="btn btn-info" data-id="${svc.short_id}" data-name="${svc.name}">INFO</button>
                 <button class="btn btn-api-action" data-action="ap" data-id="${svc.short_id}" data-name="${svc.name}">AP</button>
             </div>
         `;
@@ -313,57 +309,46 @@ const ui = {
         let statusText = 'STOPPED';
         let badgesHtml = '';
 
-        // Sağlık Durumu
-        if (svc.health === 'Quarantined') {
-            statusClass = 'status-quarantined'; statusText = 'QUARANTINED';
-            badgesHtml += `<span class="badge badge-quarantine" data-name="${svc.name}">⚠️ ${svc.violations?.length || 1} VIOLATIONS</span>`;
+        // [YENİ] Quarantined yerine Warning mantığı
+        if (svc.health === 'Warning') {
+            statusClass = 'status-warning'; statusText = 'WARNING';
+            badgesHtml += `<span class="badge badge-warning" data-name="${svc.name}">⚠️ ${svc.violations?.length || 1} ALERTS</span>`;
         } else if (svc.health === 'Draining') {
             statusClass = 'status-draining'; statusText = 'DRAINING (UPDATING)';
-            badgesHtml += `<span class="badge badge-draining">⏳ GRACEFUL SHUTDOWN</span>`;
+            badgesHtml += `<span class="badge badge-draining">⏳ SHUTDOWN</span>`;
         } else if (svc.health === 'RiskOom') {
             statusClass = 'status-riskoom'; statusText = 'RUNNING (RISK)';
             badgesHtml += `<span class="badge badge-oom">🧠 RAM LIMIT</span>`;
         } else if (svc.health === 'Online') {
             statusClass = 'status-online'; statusText = 'RUNNING';
         }
-        if (svc.has_gpu) badgesHtml += `<span class="badge badge-gpu">GPU</span>`;
-
-        // CSS Class'ı sadece değiştiyse güncelle
-        if (cardData.element.className !== `service-card ${statusClass}`) {
-            cardData.element.className = `service-card ${statusClass}`;
+        if (svc.has_gpu) {
+            badgesHtml += `<span class="badge badge-gpu">GPU</span>`;
+            document.getElementById(`gpu-row-${svc.short_id}`).style.display = 'flex';
         }
+
+        if (cardData.element.className !== `service-card ${statusClass}`) cardData.element.className = `service-card ${statusClass}`;
         
         cardData.ui.statusText.innerText = statusText;
         cardData.ui.titleGroup.innerHTML = `${svc.name} ${badgesHtml}`;
         cardData.ui.cpuText.innerText = `${svc.cpu_usage.toFixed(1)}%`;
         cardData.ui.ramText.innerText = `${svc.mem_usage} MB`;
+        cardData.ui.gpuText.innerText = `${svc.gpu_mem_usage} MB`;
 
-        // Buton Durumları
         const isUp = svc.status.toLowerCase().includes('up');
         const isRemote = state.selectedNode !== state.localNodeName;
-        const btnDisabled = (svc.health === 'Quarantined' || svc.health === 'Draining' || !isUp);
+        const btnDisabled = (svc.health === 'Draining' || !isUp);
 
         if (isRemote) {
-            // Remotesa butonları gizle
-            cardData.ui.btnStart.style.display = 'none';
-            cardData.ui.btnStop.style.display = 'none';
-            cardData.ui.btnRestart.style.display = 'none';
-            cardData.ui.btnAp.style.display = 'none';
+            cardData.ui.btnStart.style.display = 'none'; cardData.ui.btnStop.style.display = 'none';
+            cardData.ui.btnRestart.style.display = 'none'; cardData.ui.btnPull.style.display = 'none'; cardData.ui.btnAp.style.display = 'none';
         } else {
-            // Text restore in case it was "⏳..."
-            cardData.ui.btnStart.innerHTML = "▶";
-            cardData.ui.btnStop.innerHTML = "■";
-            cardData.ui.btnRestart.innerHTML = "↻";
-
-            cardData.ui.btnStart.disabled = isUp;
-            cardData.ui.btnStop.disabled = btnDisabled;
-            cardData.ui.btnRestart.disabled = btnDisabled;
-            
+            cardData.ui.btnStart.innerHTML = "▶"; cardData.ui.btnStop.innerHTML = "■"; cardData.ui.btnRestart.innerHTML = "↻"; cardData.ui.btnPull.innerHTML = "⬇ PULL";
+            cardData.ui.btnStart.disabled = isUp; cardData.ui.btnStop.disabled = btnDisabled; cardData.ui.btnRestart.disabled = btnDisabled; cardData.ui.btnPull.disabled = !isUp;
             if (svc.auto_pilot) cardData.ui.btnAp.classList.add('btn-primary');
             else cardData.ui.btnAp.classList.remove('btn-primary');
         }
 
-        // Grafikleri Çiz
         const hist = state.history[`${state.selectedNode}_${svc.name}`];
         if (hist) {
             this.drawSparkline(`cvs-cpu-${svc.short_id}`, hist.cpu, '#3b82f6', 'rgba(59, 130, 246, 0.15)');
@@ -371,10 +356,10 @@ const ui = {
         }
     },
 
+    // ... (drawSparkline aynı kalır)
     drawSparkline(canvasId, dataArray, lineColor, fillColor) {
         const canvas = document.getElementById(canvasId);
         if (!canvas) return;
-        // Optimizasyon: Çizim işlemi çok hızlı, canvas objesini koruduğumuz için performans düşmez.
         const ctx = canvas.getContext('2d');
         const w = canvas.width; const h = canvas.height;
         ctx.clearRect(0, 0, w, h);
@@ -397,11 +382,10 @@ const ui = {
         ctx.strokeStyle = lineColor; ctx.lineWidth = 1.5; ctx.stroke();
     },
 
-    openModal(id, name, violations) {
+    openModal(id, name) {
         this.currentId = id;
         const modal = document.getElementById('info-modal');
         if(!modal) return;
-
         modal.style.display = 'flex';
         
         document.querySelectorAll('.modal-tabs .tab-btn').forEach(b => b.classList.remove('active'));
@@ -416,7 +400,6 @@ const ui = {
         const logsView = document.getElementById('view-logs');
         if(logsView) logsView.classList.add('active');
 
-        // Log ekranını resetle
         const logOutput = document.getElementById('log-output');
         if (logOutput) logOutput.innerHTML = '';
         const logStatus = document.getElementById('log-status');
@@ -428,7 +411,6 @@ const ui = {
     openViolationsModal(svc) {
         const modal = document.getElementById('info-modal');
         if(!modal) return;
-
         modal.style.display = 'flex';
         
         document.querySelectorAll('.modal-tabs .tab-btn').forEach(b => b.classList.remove('active'));
@@ -438,25 +420,20 @@ const ui = {
         const vioView = document.getElementById('view-violations');
         const vioOutput = document.getElementById('violations-output');
 
-        if(vioTab) {
-            vioTab.style.display = 'block';
-            vioTab.classList.add('active');
-        }
+        if(vioTab) { vioTab.style.display = 'block'; vioTab.classList.add('active'); }
         if(vioView) vioView.classList.add('active');
 
         if(vioOutput) {
-            let html = `<h3 style="color:#fff; margin-bottom:10px;">🚫 QUARANTINE REPORT: ${svc.name}</h3>`;
-            html += `<p style="color:#999; margin-bottom:15px;">This service has been flagged by the Sentinel Governor for architectural compliance violations.</p><ul style="padding-left:20px;">`;
-            (svc.violations || []).forEach(v => {
-                html += `<li style="margin-bottom:10px;">${v}</li>`;
-            });
-            html += `</ul><br><p style="color:#666; font-style:italic;">Action Required: Fix the environment variables (.env) or Docker configurations and restart the service.</p>`;
+            let html = `<h3 style="color:#fff; margin-bottom:10px;">⚠️ SENTINEL ALERTS: ${svc.name}</h3>`;
+            html += `<p style="color:#999; margin-bottom:15px;">This service has architectural warnings but is still running.</p><ul style="padding-left:20px;">`;
+            (svc.violations || []).forEach(v => { html += `<li style="margin-bottom:10px;">${v}</li>`; });
+            html += `</ul><br><p style="color:#666; font-style:italic;">Action Required: Fix the .env variables to clear these alerts.</p>`;
             vioOutput.innerHTML = html;
         }
-
         if (this.logSocket) this.logSocket.close(); 
     },
 
+    // [LOG PARSER]: Terminali Renkli ve Okunabilir Hale Getir
     startLogStream(id) {
         if (this.logSocket) this.logSocket.close();
         
@@ -466,7 +443,33 @@ const ui = {
             const logStatus = document.getElementById('log-status');
             if (logStatus) logStatus.style.display = 'none';
             if (logOutput) {
-                logOutput.innerHTML += e.data;
+                try {
+                    const data = JSON.parse(e.data);
+                    const ts = data.ts ? data.ts.substring(11, 19) : "00:00:00";
+                    const sev = data.severity || "INFO";
+                    let sevClass = "term-sev-info";
+                    if (sev === "ERROR" || sev === "FATAL") sevClass = "term-sev-error";
+                    else if (sev === "WARN") sevClass = "term-sev-warn";
+
+                    const evt = data.event || "LOG";
+                    const msg = data.message || JSON.stringify(data);
+                    
+                    const div = document.createElement('div');
+                    div.className = "term-row";
+                    div.innerHTML = `<span class="term-time">[${ts}]</span> <span class="${sevClass}">[${sev}]</span> <span class="term-event">${evt}</span> <span class="term-msg">${msg}</span>`;
+                    
+                    logOutput.appendChild(div);
+                    
+                    // Sınır koruması
+                    if(logOutput.childNodes.length > 500) logOutput.removeChild(logOutput.firstChild);
+                    
+                } catch(err) {
+                    // JSON değilse ham metin bas
+                    const div = document.createElement('div');
+                    div.className = "term-row";
+                    div.innerText = e.data;
+                    logOutput.appendChild(div);
+                }
                 const logView = document.getElementById('view-logs');
                 if(logView) logView.scrollTop = logView.scrollHeight;
             }
@@ -483,7 +486,6 @@ const ui = {
     async loadInspect(id) {
         const inspOut = document.getElementById('inspect-output');
         if(!inspOut) return;
-
         inspOut.innerText = "Scanning Docker API...";
         try {
             const res = await fetch(`/api/service/${id}/inspect`);
@@ -504,10 +506,7 @@ const ui = {
     },
 
     updateConnectionStatus(isOnline) {
-        const statuses = [
-            document.getElementById('conn-status'),
-            document.getElementById('conn-status-mobile')
-        ];
+        const statuses = [ document.getElementById('conn-status'), document.getElementById('conn-status-mobile') ];
         statuses.forEach(st => {
             if (st) {
                 st.innerText = isOnline ? "● CLUSTER LINK ACTIVE" : "● OFFLINE";

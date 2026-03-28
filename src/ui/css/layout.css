@@ -111,6 +111,9 @@
 .service-card.status-quarantined::before { background: var(--accent-red); box-shadow: 0 0 10px var(--accent-red); }
 .service-card.status-riskoom::before { background: #c084fc; box-shadow: 0 0 10px #c084fc; }
 
+/* Kırmızı (Quarantined) sınıfı değiştirildi -> Warning */
+.service-card.status-warning::before { background: var(--warn); box-shadow: 0 0 10px var(--warn); }
+
 .svc-header { display: flex; justify-content: space-between; align-items: flex-start; }
 .svc-title { font-size: 15px; font-weight: 700; color: #fff; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .svc-image { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); margin-top: 4px; display: block; word-break: break-all; }
@@ -121,6 +124,8 @@
 .badge-quarantine { background: rgba(239, 68, 68, 0.15); color: var(--accent-red); border-color: var(--accent-red); cursor: pointer; }
 .badge-draining { background: rgba(245, 158, 11, 0.15); color: var(--accent-orange); border-color: var(--accent-orange); }
 .badge-oom { background: rgba(192, 132, 252, 0.15); color: #c084fc; border-color: #c084fc; animation: blink 1s infinite;}
+
+.badge-warning { background: rgba(210, 153, 34, 0.15); color: var(--warn); border-color: var(--warn); cursor: pointer; }
 
 /* SPARKLINE GRAPHS */
 .svc-metrics { display: flex; flex-direction: column; gap: 12px; background: #000; padding: 12px; border-radius: 6px; border: 1px solid #222; }
@@ -155,3 +160,13 @@
 }
 
 @keyframes blink { 50% { opacity: 0.3; } }
+
+
+/* Grid'deki Log Terminal Renkleri (SUTS JSON Parser için) */
+.term-row { font-family: 'JetBrains Mono', monospace; font-size: 11px; padding: 4px 0; border-bottom: 1px dashed #1a1a1a; word-break: break-all;}
+.term-time { color: #666; margin-right: 8px; }
+.term-sev-info { color: #00ff9d; font-weight: bold; margin-right: 8px; }
+.term-sev-warn { color: #d29922; font-weight: bold; margin-right: 8px; }
+.term-sev-error { color: #f85149; font-weight: bold; margin-right: 8px; }
+.term-event { color: #c084fc; margin-right: 8px; font-weight: bold;}
+.term-msg { color: #ccc; }

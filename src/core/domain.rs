@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum HealthStatus {
     Online,
-    Draining,      // Zero-downtime kapanma sürecinde (Mevcut çağrıları bitiriyor)
-    Quarantined,   // Config Drift / Kurallara uymuyor
-    RiskOom,       // RAM/GPU sınırda
+    Draining,      
+    Warning,       // [YENİ]: Kırmızı Quarantined yerine Turuncu İkaz
+    RiskOom,       
     Offline,
 }
 
@@ -19,12 +19,12 @@ pub struct ServiceInstance {
     pub auto_pilot: bool,
     pub node: String,
     pub cpu_usage: f64,
-    pub mem_usage: u64, // MB
+    pub mem_usage: u64, 
+    pub gpu_mem_usage: u64, // [YENİ]: Konteyner bazlı GPU RAM (MB)
     pub has_gpu: bool,
     
-    // --- V6.0 GOVERNANCE EKLENTİLERİ ---
     pub health: HealthStatus,
-    pub violations: Vec<String>, // Kurallara uymayan ayarlar
+    pub violations: Vec<String>, 
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]

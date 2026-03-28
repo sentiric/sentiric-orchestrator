@@ -124,7 +124,8 @@ async fn main() -> anyhow::Result<()> {
 
         loop {
             loop_counter += 1;
-            let fetch_heavy_metrics = loop_counter % 3 == 0; 
+            // [HIZ ÇÖZÜMÜ]: Artık her döngüde stats çekiyoruz (one_shot = true ile)
+            let fetch_heavy_metrics = true; 
             let do_update_check = loop_counter % 12 == 0; 
             let node_total_ram = scan_state.node_stats_cache.lock().await.ram_total;
 
@@ -144,13 +145,10 @@ async fn main() -> anyhow::Result<()> {
 
                         let mut cpu_percent = 0.0;
                         let mut mem_usage_mb = 0;
+                        let mut gpu_mem_usage_mb = 0; // İleride NVIDIA-SMI'dan doldurulacak
                         
-                        if let Some(existing) = cache.get(&name) {
-                            cpu_percent = existing.cpu_usage;
-                            mem_usage_mb = existing.mem_usage;
-                        }
-
                         if is_up && fetch_heavy_metrics {
+                            // one_shot: true Docker'ı yormadan anlık snapshot alır
                             if let Ok(stats) = scan_state.docker.get_container_stats(&container_id).await {
                                 let mem = &stats.memory_stats;
                                 mem_usage_mb = mem.usage.unwrap_or(0) / 1024 / 1024;
@@ -177,7 +175,6 @@ async fn main() -> anyhow::Result<()> {
                             cpu_cache.remove(&container_id);
                         }
 
-                        // --- V6.0 GOVERNOR AUDIT (MÜFETTİŞ DENETİMİ) ---
                         if !env_cache.contains_key(&container_id) && is_up {
                             if let Ok(inspect) = client.inspect_container(&container_id, None::<bollard::container::InspectContainerOptions>).await {
                                 if let Some(config) = inspect.config {
@@ -192,17 +189,14 @@ async fn main() -> anyhow::Result<()> {
                         let violations = Governor::audit_compliance(&name, &env_vars);
                         let health = Governor::evaluate_health(&status_str, mem_usage_mb, node_total_ram, &violations);
 
-                        // --- AUTO PILOT UPDATE CHECK ---
                         if is_auto_pilot && do_update_check {
                             let docker_adapter = &scan_state.docker;
                             let svc_name = name.clone();
                             let d_adapter = docker_adapter.clone();
-                            tokio::spawn(async move {
-                                let _ = d_adapter.check_and_update_service(&svc_name).await;
-                            });
+                            tokio::spawn(async move { let _ = d_adapter.check_and_update_service(&svc_name).await; });
                         }
 
-                        let has_gpu = name.contains("llm") || name.contains("ocr") || name.contains("cuda") || name.contains("diffusion") || name.contains("stt") || name.contains("tts");
+                        let has_gpu = name.contains("llm") || name.contains("stt") || name.contains("tts");
 
                         let svc = ServiceInstance {
                             name: name.clone(),
@@ -213,6 +207,7 @@ async fn main() -> anyhow::Result<()> {
                             node: scan_node.clone(),
                             cpu_usage: cpu_percent,
                             mem_usage: mem_usage_mb,
+                            gpu_mem_usage: gpu_mem_usage_mb, // Şimdilik 0, GPU mapper yazılınca dolacak
                             has_gpu, 
                             health,
                             violations,
@@ -223,7 +218,8 @@ async fn main() -> anyhow::Result<()> {
                 }
                 Err(_) => { } 
             }
-            tokio::time::sleep(Duration::from_secs(poll_interval)).await;
+            // Bekleme süresini AppConfig'deki interval'e bağladık (Varsayılan 3-5 saniye olmalı)
+            tokio::time::sleep(std::time::Duration::from_secs(poll_interval)).await;
         }
     });
 
