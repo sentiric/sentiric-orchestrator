@@ -4,21 +4,9 @@ import { TopologyMap } from './components/topology.js';
 import { Store } from './store.js';
 
 const ui = {
+    // Referansları güvenli tutmak için getElementById yapıyoruz, ancak null ise çökmeyecek şekilde kurgulandı.
     grid: document.getElementById('services-grid'),
     clusterList: document.getElementById('cluster-list'),
-    connStatus: document.getElementById('conn-status'),
-    modal: document.getElementById('info-modal'),
-    logView: document.getElementById('view-logs'),
-    inspectView: document.getElementById('view-inspect'),
-    violationsView: document.getElementById('view-violations'),
-    inspectOutput: document.getElementById('inspect-output'),
-    violationsOutput: document.getElementById('violations-output'),
-    
-    // View Buttons
-    btnViewGrid: document.getElementById('btn-view-grid'),
-    btnViewTopology: document.getElementById('btn-view-topology'),
-    btnViewGridMobile: document.getElementById('btn-view-grid-mobile'),
-    btnViewTopologyMobile: document.getElementById('btn-view-topology-mobile'),
     
     viewGrid: document.getElementById('view-grid'),
     viewTopology: document.getElementById('view-topology'),
@@ -28,7 +16,17 @@ const ui = {
     currentId: null,
 
     init() {
-        this.topology = new TopologyMap('topology-network');
+        console.log("💠 Sovereign Orchestrator UI Initializing...");
+
+        // Topology Network başlat
+        try {
+            if (document.getElementById('topology-network')) {
+                this.topology = new TopologyMap('topology-network');
+            }
+        } catch(e) {
+            console.warn("Topology UI Map init skipped:", e);
+        }
+        
         this.bindEvents();
         
         Store.subscribe((state) => {
@@ -36,23 +34,31 @@ const ui = {
                 this.renderSidebar(state);
                 this.renderSelectedNode(state);
                 
-                if (this.topology.isDrawn && this.viewTopology.classList.contains('active')) {
+                if (this.topology && this.topology.isDrawn && this.viewTopology && this.viewTopology.classList.contains('active')) {
                     this.topology.updateLiveState(state.cluster);
                 }
             });
         });
     },
 
+    // DEFENSIVE EVENT BINDING: Eğer element yoksa çökmez!
+    safeClick(id, handler) {
+        const el = document.getElementById(id);
+        if (el) {
+            el.addEventListener('click', handler);
+        } else {
+            console.warn(`[UI Warning] Element '#${id}' not found. Click event skipped.`);
+        }
+    },
+
     bindEvents() {
         // --- Mobil Menü ---
-        const btnMenu = document.getElementById('mobile-menu-btn');
-        if (btnMenu) {
-            btnMenu.onclick = () => {
-                document.getElementById('sidebar').classList.toggle('open');
-            };
-        }
+        this.safeClick('mobile-menu-btn', () => {
+            const sidebar = document.getElementById('sidebar');
+            if (sidebar) sidebar.classList.toggle('open');
+        });
 
-        // Kapatma işlemi (Dışarı tıklayınca menü kapansın)
+        // Mobil Menü Kapatma (Dışarı tıklayınca)
         document.addEventListener('click', (e) => {
             const sidebar = document.getElementById('sidebar');
             if (window.innerWidth <= 768 && sidebar && sidebar.classList.contains('open')) {
@@ -62,88 +68,100 @@ const ui = {
             }
         });
 
-        // --- View Toggles ---
+        // --- Görünüm Geçişleri (View Toggles) ---
         const switchToGrid = () => {
-            if(this.btnViewGrid) this.btnViewGrid.classList.add('active');
-            if(this.btnViewTopology) this.btnViewTopology.classList.remove('active');
-            if(this.btnViewGridMobile) this.btnViewGridMobile.classList.add('active');
-            if(this.btnViewTopologyMobile) this.btnViewTopologyMobile.classList.remove('active');
-            this.viewGrid.classList.add('active');
-            this.viewTopology.classList.remove('active');
+            document.getElementById('btn-view-grid')?.classList.add('active');
+            document.getElementById('btn-view-grid-mobile')?.classList.add('active');
+            
+            document.getElementById('btn-view-topology')?.classList.remove('active');
+            document.getElementById('btn-view-topology-mobile')?.classList.remove('active');
+            
+            this.viewGrid?.classList.add('active');
+            this.viewTopology?.classList.remove('active');
         };
 
         const switchToMap = () => {
-            if(this.btnViewTopology) this.btnViewTopology.classList.add('active');
-            if(this.btnViewGrid) this.btnViewGrid.classList.remove('active');
-            if(this.btnViewTopologyMobile) this.btnViewTopologyMobile.classList.add('active');
-            if(this.btnViewGridMobile) this.btnViewGridMobile.classList.remove('active');
-            this.viewGrid.classList.remove('active');
-            this.viewTopology.classList.add('active');
-            this.topology.draw().then(() => this.topology.updateLiveState(Store.state.cluster));
+            document.getElementById('btn-view-topology')?.classList.add('active');
+            document.getElementById('btn-view-topology-mobile')?.classList.add('active');
+            
+            document.getElementById('btn-view-grid')?.classList.remove('active');
+            document.getElementById('btn-view-grid-mobile')?.classList.remove('active');
+            
+            this.viewGrid?.classList.remove('active');
+            this.viewTopology?.classList.add('active');
+            
+            if (this.topology) {
+                this.topology.draw().then(() => this.topology.updateLiveState(Store.state.cluster));
+            }
         };
 
-        if(this.btnViewGrid) this.btnViewGrid.onclick = switchToGrid;
-        if(this.btnViewGridMobile) this.btnViewGridMobile.onclick = switchToGrid;
-        if(this.btnViewTopology) this.btnViewTopology.onclick = switchToMap;
-        if(this.btnViewTopologyMobile) this.btnViewTopologyMobile.onclick = switchToMap;
+        this.safeClick('btn-view-grid', switchToGrid);
+        this.safeClick('btn-view-grid-mobile', switchToGrid);
+        this.safeClick('btn-view-topology', switchToMap);
+        this.safeClick('btn-view-topology-mobile', switchToMap);
 
         // --- Modals ---
-        document.querySelectorAll('.modal-close').forEach(btn => btn.onclick = () => this.hideModal());
+        this.safeClick('btn-modal-close', () => this.hideModal());
         
         document.querySelectorAll('.modal-tabs .tab-btn').forEach(btn => {
-            btn.onclick = (e) => {
+            btn.addEventListener('click', (e) => {
                 document.querySelectorAll('.modal-tabs .tab-btn').forEach(b => b.classList.remove('active'));
                 document.querySelectorAll('.modal-view').forEach(v => v.classList.remove('active'));
                 
                 e.target.classList.add('active');
                 const targetId = e.target.getAttribute('data-target');
-                document.getElementById(targetId).classList.add('active');
+                const targetView = document.getElementById(targetId);
+                if(targetView) targetView.classList.add('active');
 
                 if (targetId === 'view-logs') this.startLogStream(this.currentId);
                 if (targetId === 'view-inspect') this.loadInspect(this.currentId);
-            };
+            });
         });
 
-        document.getElementById('btn-prune').onclick = async () => {
+        // --- System Actions ---
+        this.safeClick('btn-prune', async () => {
             if(confirm('🗑️ WARNING: This will prune stopped containers and dangling images. Proceed?')) {
-                await fetch('/api/system/prune', {method:'POST'});
-            }
-        };
-
-        document.getElementById('btn-export').onclick = async () => {
-            const res = await fetch('/api/export/llm');
-            let text = await res.text();
-            
-            const a = document.createElement('a');
-            a.href = window.URL.createObjectURL(new Blob([text], {type:'text/markdown'}));
-            a.download = `nexus_diagnostic_${Date.now()}.md`;
-            a.click();
-        };
-
-        // Grid içi buton dinlemeleri (Delegation)
-        this.grid.addEventListener('click', (e) => {
-            const btnInfo = e.target.closest('.btn-info');
-            if (btnInfo) {
-                this.openModal(btnInfo.dataset.id, btnInfo.dataset.name);
-                return;
-            }
-            
-            const btnViolations = e.target.closest('.badge-quarantine');
-            if (btnViolations) {
-                const nodeName = Store.state.selectedNode;
-                const svcName = btnViolations.dataset.name;
-                const nodeData = Store.state.cluster[nodeName];
-                if (nodeData) {
-                    const svc = nodeData.services.find(s => s.name === svcName);
-                    if (svc) this.openViolationsModal(svc);
-                }
-                return;
+                try { await fetch('/api/system/prune', {method:'POST'}); } catch(e) { console.error(e); }
             }
         });
+
+        this.safeClick('btn-export', async () => {
+            try {
+                const res = await fetch('/api/export/llm');
+                const text = await res.text();
+                const a = document.createElement('a');
+                a.href = window.URL.createObjectURL(new Blob([text], {type:'text/markdown'}));
+                a.download = `nexus_diagnostic_${Date.now()}.md`;
+                a.click();
+            } catch(e) { console.error("Export Failed", e); }
+        });
+
+        // --- Grid Actions (Delegation) ---
+        if (this.grid) {
+            this.grid.addEventListener('click', (e) => {
+                const btnInfo = e.target.closest('.btn-info');
+                if (btnInfo) {
+                    this.openModal(btnInfo.dataset.id, btnInfo.dataset.name);
+                    return;
+                }
+                
+                const btnViolations = e.target.closest('.badge-quarantine');
+                if (btnViolations) {
+                    const nodeName = Store.state.selectedNode;
+                    const svcName = btnViolations.dataset.name;
+                    const nodeData = Store.state.cluster[nodeName];
+                    if (nodeData) {
+                        const svc = nodeData.services.find(s => s.name === svcName);
+                        if (svc) this.openViolationsModal(svc);
+                    }
+                    return;
+                }
+            });
+        }
     },
 
     renderSidebar(state) {
-        if (!state.cluster) return;
+        if (!state.cluster || !this.clusterList) return;
         const nodes = Object.keys(state.cluster).sort();
         if (!state.selectedNode && nodes.length > 0) {
             Store.dispatch('SELECT_NODE', nodes[0]);
@@ -174,17 +192,24 @@ const ui = {
     },
 
     renderSelectedNode(state) {
-        if (!state.selectedNode || !state.cluster[state.selectedNode]) return;
+        if (!state.selectedNode || !state.cluster[state.selectedNode] || !this.grid) return;
         const data = state.cluster[state.selectedNode];
         const h = data.stats;
         const services = data.services;
 
-        document.getElementById('host-name').innerText = h.name;
-        document.getElementById('host-cpu-val').innerText = `${h.cpu_usage.toFixed(1)}%`;
-        document.getElementById('host-cpu-bar').style.width = `${Math.min(h.cpu_usage, 100)}%`;
-        const ramPct = (h.ram_used / h.ram_total) * 100;
-        document.getElementById('host-ram-val').innerText = `${(h.ram_used/1024).toFixed(1)} GB`;
-        document.getElementById('host-ram-bar').style.width = `${Math.min(ramPct, 100)}%`;
+        const elHostName = document.getElementById('host-name');
+        const elHostCpuVal = document.getElementById('host-cpu-val');
+        const elHostCpuBar = document.getElementById('host-cpu-bar');
+        const elHostRamVal = document.getElementById('host-ram-val');
+        const elHostRamBar = document.getElementById('host-ram-bar');
+
+        if(elHostName) elHostName.innerText = h.name;
+        if(elHostCpuVal) elHostCpuVal.innerText = `${h.cpu_usage.toFixed(1)}%`;
+        if(elHostCpuBar) elHostCpuBar.style.width = `${Math.min(h.cpu_usage, 100)}%`;
+        
+        const ramPct = h.ram_total > 0 ? (h.ram_used / h.ram_total) * 100 : 0;
+        if(elHostRamVal) elHostRamVal.innerText = `${(h.ram_used/1024).toFixed(1)} GB`;
+        if(elHostRamBar) elHostRamBar.style.width = `${Math.min(ramPct, 100)}%`;
 
         const sorted = [...services].sort((a, b) => a.name.localeCompare(b.name));
         this.grid.innerHTML = sorted.map(svc => this.createCard(svc, state)).join('');
@@ -224,7 +249,6 @@ const ui = {
     },
 
     createCard(svc, state) {
-        // --- V6.0 HEALTH STATE RESOLUTION ---
         let statusClass = 'status-offline';
         let statusText = 'STOPPED';
         let badgesHtml = '';
@@ -232,7 +256,7 @@ const ui = {
         if (svc.health === 'Quarantined') {
             statusClass = 'status-quarantined';
             statusText = 'QUARANTINED';
-            badgesHtml += `<span class="badge badge-quarantine" data-name="${svc.name}">⚠️ ${svc.violations.length} VIOLATIONS</span>`;
+            badgesHtml += `<span class="badge badge-quarantine" data-name="${svc.name}">⚠️ ${svc.violations?.length || 1} VIOLATIONS</span>`;
         } else if (svc.health === 'Draining') {
             statusClass = 'status-draining';
             statusText = 'DRAINING (UPDATING)';
@@ -257,10 +281,9 @@ const ui = {
         } else {
             const apClick = `
                 window.Store.dispatch('TOGGLE_AP_OPTIMISTIC', { node: '${state.selectedNode}', service: '${svc.name}', enabled: ${!svc.auto_pilot} });
-                fetch('/api/toggle-autopilot', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({service:'${svc.name}', enabled:${!svc.auto_pilot}})});
+                fetch('/api/toggle-autopilot', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({service:'${svc.name}', enabled:${!svc.auto_pilot}})}).catch(e => console.error(e));
             `;
             
-            // Eğer karantinadaysa veya draining ise butonları kilitle
             const btnDisabled = (svc.health === 'Quarantined' || svc.health === 'Draining' || !isUp) ? 'disabled' : '';
 
             actions = `
@@ -298,55 +321,78 @@ const ui = {
 
     openModal(id, name) {
         this.currentId = id;
-        this.modal.style.display = 'flex';
+        const modal = document.getElementById('info-modal');
+        if(!modal) return;
+
+        modal.style.display = 'flex';
         
-        // Reset tabs
         document.querySelectorAll('.modal-tabs .tab-btn').forEach(b => b.classList.remove('active'));
         document.querySelectorAll('.modal-view').forEach(v => v.classList.remove('active'));
         
-        document.getElementById('tab-violations').style.display = 'none'; // Normalde gizle
-        document.querySelector('.modal-tabs .tab-btn[data-target="view-logs"]').classList.add('active');
-        document.getElementById('view-logs').classList.add('active');
+        const vioTab = document.getElementById('tab-violations');
+        if(vioTab) vioTab.style.display = 'none';
+
+        const logsTabBtn = document.querySelector('.modal-tabs .tab-btn[data-target="view-logs"]');
+        if(logsTabBtn) logsTabBtn.classList.add('active');
+        
+        const logsView = document.getElementById('view-logs');
+        if(logsView) logsView.classList.add('active');
         
         this.startLogStream(id);
     },
 
     openViolationsModal(svc) {
-        this.modal.style.display = 'flex';
+        const modal = document.getElementById('info-modal');
+        if(!modal) return;
+
+        modal.style.display = 'flex';
         
         document.querySelectorAll('.modal-tabs .tab-btn').forEach(b => b.classList.remove('active'));
         document.querySelectorAll('.modal-view').forEach(v => v.classList.remove('active'));
 
         const vioTab = document.getElementById('tab-violations');
-        vioTab.style.display = 'block';
-        vioTab.classList.add('active');
-        document.getElementById('view-violations').classList.add('active');
+        const vioView = document.getElementById('view-violations');
+        const vioOutput = document.getElementById('violations-output');
 
-        let html = `<h3>🚫 QUARANTINE REPORT: ${svc.name}</h3><br>`;
-        html += `<p>This service has been flagged by the Sentinel Governor for architectural compliance violations.</p><br><ul>`;
-        svc.violations.forEach(v => {
-            html += `<li style="margin-bottom:10px;">${v}</li>`;
-        });
-        html += `</ul><br><p style="color:#666;">Action Required: Fix the environment variables (.env) or Docker configurations and restart the service.</p>`;
-        
-        this.violationsOutput.innerHTML = html;
-        if (this.logSocket) this.logSocket.close(); // Log akışını durdur
+        if(vioTab) {
+            vioTab.style.display = 'block';
+            vioTab.classList.add('active');
+        }
+        if(vioView) vioView.classList.add('active');
+
+        if(vioOutput) {
+            let html = `<h3>🚫 QUARANTINE REPORT: ${svc.name}</h3><br>`;
+            html += `<p>This service has been flagged by the Sentinel Governor for architectural compliance violations.</p><br><ul>`;
+            (svc.violations || []).forEach(v => {
+                html += `<li style="margin-bottom:10px;">${v}</li>`;
+            });
+            html += `</ul><br><p style="color:#666;">Action Required: Fix the environment variables (.env) or Docker configurations and restart the service.</p>`;
+            vioOutput.innerHTML = html;
+        }
+
+        if (this.logSocket) this.logSocket.close(); 
     },
 
     startLogStream(id) {
         const logOutput = document.getElementById('log-output');
+        if(!logOutput) return;
+
         logOutput.innerHTML = '';
         if (this.logSocket) this.logSocket.close();
         
         this.logSocket = new WebSocket(`ws://${window.location.host}/ws/logs/${id}`);
         this.logSocket.onmessage = (e) => {
             logOutput.innerHTML += e.data;
-            this.logView.scrollTop = this.logView.scrollHeight;
+            const logView = document.getElementById('view-logs');
+            if(logView) logView.scrollTop = logView.scrollHeight;
         };
     },
 
     async loadInspect(id) {
-        this.inspectOutput.innerText = "Scanning Docker API...";
+        const inspOut = document.getElementById('inspect-output');
+        if(!inspOut) return;
+
+        inspOut.innerText = "Scanning Docker API...";
         try {
             const res = await fetch(`/api/service/${id}/inspect`);
             const data = await res.json();
@@ -355,34 +401,42 @@ const ui = {
                 Config: { Image: data.Config.Image, Env: data.Config.Env },
                 Network: data.NetworkSettings.Networks
             };
-            this.inspectOutput.innerText = JSON.stringify(clean, null, 2);
-        } catch(e) { this.inspectOutput.innerText = "Error: " + e; }
+            inspOut.innerText = JSON.stringify(clean, null, 2);
+        } catch(e) { inspOut.innerText = "Error: " + e; }
     },
 
     hideModal() {
-        this.modal.style.display = 'none';
+        const modal = document.getElementById('info-modal');
+        if(modal) modal.style.display = 'none';
         if (this.logSocket) this.logSocket.close();
     },
+
+    updateConnectionStatus(isOnline) {
+        const statuses = [
+            document.getElementById('conn-status'),
+            document.getElementById('conn-status-mobile')
+        ];
+        statuses.forEach(st => {
+            if (st) {
+                st.innerText = isOnline ? "● CLUSTER LINK ACTIVE" : "● OFFLINE";
+                st.className = `conn-status ${isOnline ? 'online' : 'offline'}`;
+            }
+        });
+    }
 };
 
+// Global Exposure for event handlers
 window.Store = Store; 
 window.ui = ui;
 
+// Boot
 ui.init(); 
 
 new WebSocketStream(`ws://${window.location.host}/ws`, (msg) => {
-    const st = document.getElementById('conn-status');
-    if (st) {
-        st.innerText = "● CLUSTER LINK ACTIVE";
-        st.className = "conn-status online";
-    }
+    ui.updateConnectionStatus(true);
     if (msg.type === 'cluster_update') {
         Store.dispatch('CLUSTER_UPDATE', msg.data);
     }
 }, (isOnline) => {
-    const st = document.getElementById('conn-status');
-    if (st) {
-        st.innerText = isOnline ? "● CLUSTER LINK ACTIVE" : "● OFFLINE";
-        st.className = `conn-status ${isOnline ? 'online' : 'offline'}`;
-    }
+    ui.updateConnectionStatus(isOnline);
 }).connect();
