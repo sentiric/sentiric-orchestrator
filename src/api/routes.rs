@@ -1,25 +1,33 @@
-// Dosya: src/api/routes.rs
+// src/api/routes.rs
 use axum::{
-    extract::{State, Query, Path, ws::{Message, WebSocket, WebSocketUpgrade}},
+    extract::{ws::{Message, WebSocket, WebSocketUpgrade}, State, Path, Query},
     response::{Html, IntoResponse, Response},
     routing::{get, post},
     http::StatusCode,
     Json, Router,
 };
-use tower_http::services::ServeDir; 
+use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
 use std::sync::Arc;
-use crate::core::domain::{ActionParams, ToggleParams, ClusterReport, ServiceInstance, TopologyMap, TopologyNode, TopologyEdge};
-use crate::AppState;
+use std::sync::atomic::{Ordering};
 use futures_util::StreamExt;
 use tracing::info;
+
+use crate::core::domain::{ActionParams, ToggleParams, TopologyMap, TopologyNode, TopologyEdge, ServiceInstance, ClusterReport};
+use crate::AppState;
+use serde_json::{json, Value};
+
+const UI_ASSETS_PATH: &str = "src/ui";
 
 pub fn create_router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/", get(index_handler))
-        .nest_service("/ui", ServeDir::new("src/ui"))
+        .nest_service("/ui", ServeDir::new(UI_ASSETS_PATH))
         .route("/ws", get(ws_handler))
         .route("/ws/logs/:id", get(ws_logs_handler))
+        
+        // [KRİTİK DÜZELTME]: 404 Hatasını çözen rota eklendi!
+        .route("/api/config", get(get_system_config))         
         
         .route("/api/status", get(status_handler))
         .route("/api/topology", get(topology_handler))
@@ -37,52 +45,51 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .layer(TraceLayer::new_for_http())
 }
 
+async fn get_system_config(State(_state): State<Arc<AppState>>) -> Json<serde_json::Value> {
+    let version = env!("CARGO_PKG_VERSION");
+    let node_name = hostname::get().map(|h| h.to_string_lossy().into_owned()).unwrap_or("unknown".into());
+    Json(json!({
+        "version": version,
+        "node_name": node_name,
+        "is_upstream_enabled": !std::env::var("UPSTREAM_ORCHESTRATOR_URL").unwrap_or_default().is_empty(),
+    }))
+}
+
 async fn index_handler() -> impl IntoResponse {
-    match std::fs::read_to_string("src/ui/index.html") {
+    match std::fs::read_to_string(format!("{}/index.html", UI_ASSETS_PATH)) {
         Ok(html) => Html(html),
-        Err(_) => Html("<h1>System Error: UI assets not found. Check src/ui folder.</h1>".to_string()),
+        Err(_) => Html("<h1>System Error: UI assets not found.</h1>".to_string()),
     }
 }
 
-// --- [ARCH-COMPLIANCE] TOPOLOJİ ONARILDI VE SPAGETTİ ÖNLENDİ ---
 async fn topology_handler() -> Json<TopologyMap> {
     let nodes = vec![
-        // Edge & Telecom (sip- ön ekleri güncellendi)
         TopologyNode { id: "sip-sbc-service".into(), label: "SBC\n(Edge)".into(), group: "edge".into() },
         TopologyNode { id: "sip-proxy-service".into(), label: "Proxy\n(Router)".into(), group: "telecom".into() },
         TopologyNode { id: "sip-b2bua-service".into(), label: "B2BUA\n(Session)".into(), group: "telecom".into() },
         TopologyNode { id: "sip-registrar-service".into(), label: "Registrar\n(Location)".into(), group: "telecom".into() },
         TopologyNode { id: "media-service".into(), label: "Media\n(RTP Engine)".into(), group: "telecom".into() },
-        
-        // Core Logic
         TopologyNode { id: "dialplan-service".into(), label: "Dialplan\n(Routing)".into(), group: "core".into() },
         TopologyNode { id: "user-service".into(), label: "User\n(Identity)".into(), group: "core".into() },
         TopologyNode { id: "workflow-service".into(), label: "Workflow\n(Cortex)".into(), group: "core".into() },
         TopologyNode { id: "agent-service".into(), label: "Agent\n(Orchestrator)".into(), group: "core".into() },
         TopologyNode { id: "telephony-action-service".into(), label: "TAS\n(Pipeline)".into(), group: "core".into() },
         TopologyNode { id: "dialog-service".into(), label: "Dialog\n(Memory)".into(), group: "core".into() },
-        
-        // AI Gateways
         TopologyNode { id: "stt-gateway-service".into(), label: "STT\nGateway".into(), group: "ai".into() },
         TopologyNode { id: "tts-gateway-service".into(), label: "TTS\nGateway".into(), group: "ai".into() },
         TopologyNode { id: "llm-gateway-service".into(), label: "LLM\nGateway".into(), group: "ai".into() },
-        
-        // Infra
-        TopologyNode { id: "rabbitmq".into(), label: "RabbitMQ\n(Event Bus)".into(), group: "infra".into() },
+        TopologyNode { id: "rabbitmq".into(), label: "RabbitMQ\n(Event)".into(), group: "infra".into() },
         TopologyNode { id: "redis".into(), label: "Redis\n(State)".into(), group: "infra".into() },
         TopologyNode { id: "postgres".into(), label: "Postgres\n(Data)".into(), group: "infra".into() },
     ];
 
     let edges = vec![
-        // Telecom Akışı (Ana Damar - Düz Çizgi)
         TopologyEdge { from: "sip-sbc-service".into(), to: "sip-proxy-service".into(), label: "SIP".into(), dashes: false },
         TopologyEdge { from: "sip-proxy-service".into(), to: "sip-b2bua-service".into(), label: "SIP".into(), dashes: false },
         TopologyEdge { from: "sip-proxy-service".into(), to: "sip-registrar-service".into(), label: "gRPC".into(), dashes: false },
         TopologyEdge { from: "sip-proxy-service".into(), to: "dialplan-service".into(), label: "gRPC".into(), dashes: false },
         TopologyEdge { from: "sip-b2bua-service".into(), to: "media-service".into(), label: "gRPC".into(), dashes: false },
         TopologyEdge { from: "sip-b2bua-service".into(), to: "dialplan-service".into(), label: "gRPC".into(), dashes: false },
-        
-        // Infra Bağlantıları (Karmaşayı önlemek için Kesikli Çizgi [dashes: true])
         TopologyEdge { from: "sip-b2bua-service".into(), to: "rabbitmq".into(), label: "AMQP".into(), dashes: true },
         TopologyEdge { from: "sip-b2bua-service".into(), to: "redis".into(), label: "TCP".into(), dashes: true },
         TopologyEdge { from: "sip-registrar-service".into(), to: "redis".into(), label: "TCP".into(), dashes: true },
@@ -90,16 +97,12 @@ async fn topology_handler() -> Json<TopologyMap> {
         TopologyEdge { from: "dialplan-service".into(), to: "user-service".into(), label: "gRPC".into(), dashes: false },
         TopologyEdge { from: "dialplan-service".into(), to: "postgres".into(), label: "TCP".into(), dashes: true },
         TopologyEdge { from: "user-service".into(), to: "postgres".into(), label: "TCP".into(), dashes: true },
-        
-        // Workflow & Agent
         TopologyEdge { from: "rabbitmq".into(), to: "workflow-service".into(), label: "AMQP".into(), dashes: true },
         TopologyEdge { from: "workflow-service".into(), to: "postgres".into(), label: "TCP".into(), dashes: true },
         TopologyEdge { from: "workflow-service".into(), to: "redis".into(), label: "TCP".into(), dashes: true },
         TopologyEdge { from: "workflow-service".into(), to: "media-service".into(), label: "gRPC".into(), dashes: false },
         TopologyEdge { from: "workflow-service".into(), to: "agent-service".into(), label: "gRPC".into(), dashes: false },
         TopologyEdge { from: "workflow-service".into(), to: "sip-b2bua-service".into(), label: "gRPC".into(), dashes: false },
-        
-        // AI Pipeline
         TopologyEdge { from: "agent-service".into(), to: "telephony-action-service".into(), label: "gRPC".into(), dashes: false },
         TopologyEdge { from: "agent-service".into(), to: "redis".into(), label: "TCP".into(), dashes: true },
         TopologyEdge { from: "telephony-action-service".into(), to: "stt-gateway-service".into(), label: "gRPC".into(), dashes: false },
@@ -156,10 +159,7 @@ async fn export_llm_handler(State(state): State<Arc<AppState>>) -> String {
             }
         }
     }
-    
-    if !drift_found {
-        report.push_str("✅ No configuration drift detected. Cluster is synchronized.\n");
-    }
+    if !drift_found { report.push_str("✅ No configuration drift detected. Cluster is synchronized.\n"); }
 
     report.push_str("\n## 3. SERVICE DETAILS\n");
     for (node, data) in cluster.iter() {
@@ -171,51 +171,75 @@ async fn export_llm_handler(State(state): State<Arc<AppState>>) -> String {
         }
         report.push_str("\n");
     }
-
     report
 }
 
 async fn inspect_handler(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
-    match state.docker.inspect_service(&id).await { Ok(d) => Json(d).into_response(), Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response() }
+    // [KRİTİK DÜZELTME]: null id gelirse çökme!
+    if id.is_empty() || id == "null" { return (StatusCode::BAD_REQUEST, "Invalid ID").into_response(); }
+    match state.docker.inspect_service(&id).await { 
+        Ok(d) => Json(d).into_response(), 
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response() 
+    }
 }
+
 async fn prune_handler(State(state): State<Arc<AppState>>) -> Response {
     match state.docker.prune_system().await { Ok(m) => (StatusCode::OK, m).into_response(), Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response() }
 }
-async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> impl IntoResponse { ws.on_upgrade(|socket| handle_socket(socket, state)) }
+
+async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> impl IntoResponse { 
+    ws.on_upgrade(|socket| handle_socket(socket, state)) 
+}
+
 async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
     let mut rx = state.tx.subscribe();
     while let Ok(msg) = rx.recv().await { if socket.send(Message::Text(msg)).await.is_err() { break; } }
 }
-async fn ws_logs_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>, Path(id): Path<String>) -> impl IntoResponse { ws.on_upgrade(move |socket| handle_log_socket(socket, state, id)) }
+
+async fn ws_logs_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>, Path(id): Path<String>) -> impl IntoResponse { 
+    ws.on_upgrade(move |socket| handle_log_socket(socket, state, id)) 
+}
+
 async fn handle_log_socket(mut socket: WebSocket, state: Arc<AppState>, id: String) {
+    if id.is_empty() || id == "null" { return; }
     let mut log_stream = state.docker.get_log_stream(&id);
     while let Some(res) = log_stream.next().await {
         if let Ok(out) = res {
-             let b: Vec<u8> = match out { bollard::container::LogOutput::StdOut{message} => message.into(), bollard::container::LogOutput::StdErr{message} => message.into(), _ => vec![] };
+             let b: Vec<u8> = match out { 
+                 bollard::container::LogOutput::StdOut{message} => message.into(), 
+                 bollard::container::LogOutput::StdErr{message} => message.into(), 
+                 _ => vec![] 
+             };
              if socket.send(Message::Text(String::from_utf8_lossy(&b).to_string())).await.is_err() { break; }
         }
     }
 }
+
 async fn status_handler(State(state): State<Arc<AppState>>) -> Json<Vec<ServiceInstance>> {
     let s = state.services_cache.lock().await; Json(s.values().cloned().collect())
 }
+
 async fn update_handler(State(state): State<Arc<AppState>>, Query(p): Query<ActionParams>) -> Response {
     info!(event="MANUAL_UPDATE_TRIGGERED", service=%p.service, "API Update Request");
     match state.docker.force_update_service(&p.service).await { Ok(m) => (StatusCode::OK, m).into_response(), Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response() }
 }
+
 async fn toggle_handler(State(state): State<Arc<AppState>>, Json(p): Json<ToggleParams>) -> Json<bool> {
     info!(event="AUTOPILOT_TOGGLED", service=%p.service, enabled=%p.enabled, "Auto-pilot toggle");
     state.auto_pilot_config.lock().await.insert(p.service, p.enabled); Json(p.enabled)
 }
+
 async fn start_handler(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
-    info!(event="MANUAL_START", container=%id, "API Start Request");
+    if id.is_empty() || id == "null" { return (StatusCode::BAD_REQUEST, "Invalid ID").into_response(); }
     match state.docker.start_service(&id).await { Ok(_) => (StatusCode::OK, "Started").into_response(), Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response() }
 }
+
 async fn stop_handler(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
-    info!(event="MANUAL_STOP", container=%id, "API Stop Request");
+    if id.is_empty() || id == "null" { return (StatusCode::BAD_REQUEST, "Invalid ID").into_response(); }
     match state.docker.stop_service(&id).await { Ok(_) => (StatusCode::OK, "Stopped").into_response(), Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response() }
 }
+
 async fn restart_handler(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
-    info!(event="MANUAL_RESTART", container=%id, "API Restart Request");
+    if id.is_empty() || id == "null" { return (StatusCode::BAD_REQUEST, "Invalid ID").into_response(); }
     match state.docker.restart_service(&id).await { Ok(_) => (StatusCode::OK, "Restarted").into_response(), Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response() }
 }

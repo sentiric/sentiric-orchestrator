@@ -16,13 +16,19 @@ const ui = {
     init() {
         console.log("💠 Sovereign Orchestrator UI Initializing...");
         
-        // Versiyonu Dinamik Çek
-        fetch('/api/config').then(r=>r.json()).then(data => {
-            const vM = document.getElementById('v-badge-mobile');
-            const vD = document.getElementById('v-badge-desktop');
-            if(vM) vM.innerText = `v${data.version}`;
-            if(vD) vD.innerText = `v${data.version}`;
-        }).catch(e=>console.error("Config load failed", e));
+        // 404 Veriyordu, artık güvenle Config okuyacak. Hata alsa bile arayüz çökmeyecek.
+        fetch('/api/config')
+            .then(r => {
+                if(!r.ok) throw new Error("Config not found");
+                return r.json();
+            })
+            .then(data => {
+                const vM = document.getElementById('v-badge-mobile');
+                const vD = document.getElementById('v-badge-desktop');
+                if(vM) vM.innerText = `v${data.version}`;
+                if(vD) vD.innerText = `v${data.version}`;
+            })
+            .catch(e => console.warn("[UI] Config fetch skipped:", e.message));
 
         try {
             if (document.getElementById('topology-network')) {
@@ -44,13 +50,24 @@ const ui = {
         });
     },
 
+    // KORUMA: Eğer element DOM'da yoksa çökmek yerine sessizce atlar
     safeClick(id, handler) {
         const el = document.getElementById(id);
-        if (el) el.addEventListener('click', handler);
+        if (el) {
+            // Mevcut event listenerları temizlemek için (Eğer iki kez çağrılırsa diye)
+            const newEl = el.cloneNode(true);
+            el.parentNode.replaceChild(newEl, el);
+            newEl.addEventListener('click', handler);
+        } else {
+            console.warn(`[UI Warning] Button '#${id}' not found in DOM.`);
+        }
     },
 
     bindEvents() {
-        this.safeClick('mobile-menu-btn', () => { document.getElementById('sidebar')?.classList.toggle('open'); });
+        this.safeClick('mobile-menu-btn', () => { 
+            const sidebar = document.getElementById('sidebar');
+            if (sidebar) sidebar.classList.toggle('open'); 
+        });
 
         document.addEventListener('click', (e) => {
             const sidebar = document.getElementById('sidebar');
@@ -118,16 +135,20 @@ const ui = {
         });
 
         this.safeClick('btn-self-update', async () => {
-            if(confirm('⚠️ WARNING: Orchestrator will spawn an ephemeral updater and restart itself. UI will disconnect momentarily. Proceed?')) {
+            if(confirm('⚠️ WARNING: Orchestrator will restart itself. UI will disconnect momentarily. Proceed?')) {
                 alert("Self-update sequence initiated. Please wait 10 seconds and refresh.");
-                // Burada API çağrısı yapılabilir (Phase 2).
             }
         });
 
-        if (this.grid) {
-            this.grid.addEventListener('click', (e) => {
+        // Event Delegation for dynamic grid elements
+        const gridEl = document.getElementById('services-grid');
+        if (gridEl) {
+            gridEl.addEventListener('click', (e) => {
                 const btnInfo = e.target.closest('.btn-info');
-                if (btnInfo) { this.openModal(btnInfo.dataset.id, btnInfo.dataset.name); return; }
+                if (btnInfo) { 
+                    this.openModal(btnInfo.dataset.id, btnInfo.dataset.name); 
+                    return; 
+                }
                 
                 const btnViolations = e.target.closest('.badge-warning');
                 if (btnViolations) {
@@ -146,6 +167,8 @@ const ui = {
                     const action = btnAction.dataset.action;
                     const sid = btnAction.dataset.id;
                     const sname = btnAction.dataset.name;
+                    
+                    if (!sid || sid === 'null' || sid === 'undefined') return;
 
                     if (action === 'start') {
                         fetch(`/api/service/${sid}/start`, {method:'POST'}).catch(console.error);
@@ -309,7 +332,6 @@ const ui = {
         let statusText = 'STOPPED';
         let badgesHtml = '';
 
-        // [YENİ] Quarantined yerine Warning mantığı
         if (svc.health === 'Warning') {
             statusClass = 'status-warning'; statusText = 'WARNING';
             badgesHtml += `<span class="badge badge-warning" data-name="${svc.name}">⚠️ ${svc.violations?.length || 1} ALERTS</span>`;
@@ -324,7 +346,8 @@ const ui = {
         }
         if (svc.has_gpu) {
             badgesHtml += `<span class="badge badge-gpu">GPU</span>`;
-            document.getElementById(`gpu-row-${svc.short_id}`).style.display = 'flex';
+            const row = document.getElementById(`gpu-row-${svc.short_id}`);
+            if(row) row.style.display = 'flex';
         }
 
         if (cardData.element.className !== `service-card ${statusClass}`) cardData.element.className = `service-card ${statusClass}`;
@@ -333,7 +356,7 @@ const ui = {
         cardData.ui.titleGroup.innerHTML = `${svc.name} ${badgesHtml}`;
         cardData.ui.cpuText.innerText = `${svc.cpu_usage.toFixed(1)}%`;
         cardData.ui.ramText.innerText = `${svc.mem_usage} MB`;
-        cardData.ui.gpuText.innerText = `${svc.gpu_mem_usage} MB`;
+        if(cardData.ui.gpuText) cardData.ui.gpuText.innerText = `${svc.gpu_mem_usage} MB`;
 
         const isUp = svc.status.toLowerCase().includes('up');
         const isRemote = state.selectedNode !== state.localNodeName;
@@ -356,7 +379,6 @@ const ui = {
         }
     },
 
-    // ... (drawSparkline aynı kalır)
     drawSparkline(canvasId, dataArray, lineColor, fillColor) {
         const canvas = document.getElementById(canvasId);
         if (!canvas) return;
@@ -367,22 +389,16 @@ const ui = {
         const step = w / (dataArray.length - 1);
         
         ctx.beginPath();
-        dataArray.forEach((val, i) => {
-            const y = h - ((val / max) * h);
-            if (i === 0) ctx.moveTo(0, y); else ctx.lineTo(i * step, y);
-        });
-        ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.closePath();
-        ctx.fillStyle = fillColor; ctx.fill();
+        dataArray.forEach((val, i) => { const y = h - ((val / max) * h); if (i === 0) ctx.moveTo(0, y); else ctx.lineTo(i * step, y); });
+        ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.closePath(); ctx.fillStyle = fillColor; ctx.fill();
 
         ctx.beginPath();
-        dataArray.forEach((val, i) => {
-            const y = h - ((val / max) * h);
-            if (i === 0) ctx.moveTo(0, y); else ctx.lineTo(i * step, y);
-        });
+        dataArray.forEach((val, i) => { const y = h - ((val / max) * h); if (i === 0) ctx.moveTo(0, y); else ctx.lineTo(i * step, y); });
         ctx.strokeStyle = lineColor; ctx.lineWidth = 1.5; ctx.stroke();
     },
 
     openModal(id, name) {
+        if (!id || id === 'null' || id === 'undefined') return;
         this.currentId = id;
         const modal = document.getElementById('info-modal');
         if(!modal) return;
@@ -433,8 +449,8 @@ const ui = {
         if (this.logSocket) this.logSocket.close(); 
     },
 
-    // [LOG PARSER]: Terminali Renkli ve Okunabilir Hale Getir
     startLogStream(id) {
+        if (!id || id === 'null' || id === 'undefined') return;
         if (this.logSocket) this.logSocket.close();
         
         this.logSocket = new WebSocket(`ws://${window.location.host}/ws/logs/${id}`);
@@ -459,12 +475,8 @@ const ui = {
                     div.innerHTML = `<span class="term-time">[${ts}]</span> <span class="${sevClass}">[${sev}]</span> <span class="term-event">${evt}</span> <span class="term-msg">${msg}</span>`;
                     
                     logOutput.appendChild(div);
-                    
-                    // Sınır koruması
                     if(logOutput.childNodes.length > 500) logOutput.removeChild(logOutput.firstChild);
-                    
                 } catch(err) {
-                    // JSON değilse ham metin bas
                     const div = document.createElement('div');
                     div.className = "term-row";
                     div.innerText = e.data;
@@ -476,19 +488,18 @@ const ui = {
         };
         this.logSocket.onerror = () => {
             const logStatus = document.getElementById('log-status');
-            if (logStatus) {
-                logStatus.innerText = "Error: Cannot connect to container log stream.";
-                logStatus.style.color = "var(--accent-red)";
-            }
+            if (logStatus) { logStatus.innerText = "Error: Stream interrupted."; logStatus.style.color = "var(--accent-red)"; }
         };
     },
 
     async loadInspect(id) {
+        if (!id || id === 'null' || id === 'undefined') return;
         const inspOut = document.getElementById('inspect-output');
         if(!inspOut) return;
         inspOut.innerText = "Scanning Docker API...";
         try {
             const res = await fetch(`/api/service/${id}/inspect`);
+            if(!res.ok) throw new Error("HTTP " + res.status);
             const data = await res.json();
             const clean = {
                 Id: data.Id, Created: data.Created, State: data.State,
@@ -496,7 +507,7 @@ const ui = {
                 Network: data.NetworkSettings.Networks
             };
             inspOut.innerText = JSON.stringify(clean, null, 2);
-        } catch(e) { inspOut.innerText = "Error: " + e; }
+        } catch(e) { inspOut.innerText = "Error: " + e.message; }
     },
 
     hideModal() {
@@ -519,13 +530,16 @@ const ui = {
 window.Store = Store; 
 window.ui = ui;
 
-ui.init(); 
+// Window yüklendiğinde başlat (Flash ve Null hatalarını keser)
+window.addEventListener('load', () => {
+    ui.init(); 
 
-new WebSocketStream(`ws://${window.location.host}/ws`, (msg) => {
-    ui.updateConnectionStatus(true);
-    if (msg.type === 'cluster_update') {
-        Store.dispatch('CLUSTER_UPDATE', msg.data);
-    }
-}, (isOnline) => {
-    ui.updateConnectionStatus(isOnline);
-}).connect();
+    new WebSocketStream(`ws://${window.location.host}/ws`, (msg) => {
+        ui.updateConnectionStatus(true);
+        if (msg.type === 'cluster_update') {
+            Store.dispatch('CLUSTER_UPDATE', msg.data);
+        }
+    }, (isOnline) => {
+        ui.updateConnectionStatus(isOnline);
+    }).connect();
+});
