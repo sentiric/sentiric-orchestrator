@@ -1,11 +1,9 @@
-// Dosya: src/main.rs
+// src/main.rs
 mod config;
 mod core;
 mod adapters;
 mod api;
-mod telemetry;
-
-use crate::core::governor::Governor;
+mod telemetry; 
 
 use std::{sync::Arc, collections::HashMap, time::Duration};
 use tokio::sync::{Mutex, broadcast};
@@ -20,6 +18,7 @@ use crate::adapters::docker::DockerAdapter;
 use crate::adapters::system::SystemMonitor;
 use crate::core::domain::{ServiceInstance, NodeStats, ClusterReport};
 use crate::telemetry::SutsFormatter;
+use crate::core::governor::Governor; // Uyarı giderildi (Kullanımda)
 
 struct CpuStatsCache {
     cpu_usage: u64,
@@ -46,7 +45,6 @@ async fn main() -> anyhow::Result<()> {
     let log_format = std::env::var("LOG_FORMAT").unwrap_or_else(|_| "json".to_string());
 
     if log_format == "json" {
-        // [ARCH-COMPLIANCE] tenant_id formatter'a enjekte edildi
         let suts_formatter = SutsFormatter::new(
             "orchestrator-service".to_string(),
             env!("CARGO_PKG_VERSION").to_string(),
@@ -64,7 +62,7 @@ async fn main() -> anyhow::Result<()> {
         service.version = env!("CARGO_PKG_VERSION"),
         node.name = %cfg.node_name,
         mode = if cfg.upstream_url.is_some() { "EDGE" } else { "MASTER" },
-        "💠 SENTIRIC ORCHESTRATOR v5.5 (OPTIMIZED) Booting..."
+        "💠 SENTIRIC ORCHESTRATOR v6.0 (NEXUS GOVERNOR) Booting..."
     );
 
     let (tx, _) = broadcast::channel::<String>(100);
@@ -113,7 +111,7 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    // 2. DOCKER SCAN (CPU OPTIMIZED)
+    // 2. DOCKER SCAN & GOVERNANCE LOOP
     let scan_state = state.clone();
     let scan_node = cfg.node_name.clone();
     let poll_interval = cfg.poll_interval; 
@@ -122,15 +120,12 @@ async fn main() -> anyhow::Result<()> {
         let client = scan_state.docker.get_client();
         let mut loop_counter = 0;
         let mut cpu_cache: HashMap<String, CpuStatsCache> = HashMap::new();
-        // Container Inspection Cache (Env değişkenleri sürekli değişmez)
         let mut env_cache: HashMap<String, Vec<String>> = HashMap::new();
 
         loop {
             loop_counter += 1;
             let fetch_heavy_metrics = loop_counter % 3 == 0; 
             let do_update_check = loop_counter % 12 == 0; 
-
-            // Toplam node RAM bilgisini çek (OOM Guard için)
             let node_total_ram = scan_state.node_stats_cache.lock().await.ram_total;
 
             match client.list_containers(Some(ListContainersOptions::<String> { all: true, ..Default::default() })).await {
@@ -178,7 +173,6 @@ async fn main() -> anyhow::Result<()> {
                                 }
                                 cpu_cache.insert(container_id.clone(), CpuStatsCache { cpu_usage: cpu_total, system_usage: system_total });
                             }
-                            
                         } else if !is_up {
                             cpu_cache.remove(&container_id);
                         }
@@ -195,12 +189,20 @@ async fn main() -> anyhow::Result<()> {
                         }
 
                         let env_vars = env_cache.get(&container_id).cloned().unwrap_or_default();
-                        let violations = crate::core::governor::Governor::audit_compliance(&name, &env_vars);
-                        let health = crate::core::governor::Governor::evaluate_health(&status_str, mem_usage_mb, node_total_ram, &violations);
+                        let violations = Governor::audit_compliance(&name, &env_vars);
+                        let health = Governor::evaluate_health(&status_str, mem_usage_mb, node_total_ram, &violations);
 
-                        // Auto-pilot kontrolü
+                        // --- AUTO PILOT UPDATE CHECK ---
+                        if is_auto_pilot && do_update_check {
+                            let docker_adapter = &scan_state.docker;
+                            let svc_name = name.clone();
+                            let d_adapter = docker_adapter.clone();
+                            tokio::spawn(async move {
+                                let _ = d_adapter.check_and_update_service(&svc_name).await;
+                            });
+                        }
 
-                        let has_gpu = name.contains("llm") || name.contains("ocr") || name.contains("cuda") || name.contains("diffusion");
+                        let has_gpu = name.contains("llm") || name.contains("ocr") || name.contains("cuda") || name.contains("diffusion") || name.contains("stt") || name.contains("tts");
 
                         let svc = ServiceInstance {
                             name: name.clone(),
@@ -212,8 +214,8 @@ async fn main() -> anyhow::Result<()> {
                             cpu_usage: cpu_percent,
                             mem_usage: mem_usage_mb,
                             has_gpu, 
-                            health,         // [YENİ]
-                            violations,     // [YENİ]
+                            health,
+                            violations,
                         };
                         
                         cache.insert(name, svc);
@@ -221,7 +223,7 @@ async fn main() -> anyhow::Result<()> {
                 }
                 Err(_) => { } 
             }
-            tokio::time::sleep(std::time::Duration::from_secs(poll_interval)).await;
+            tokio::time::sleep(Duration::from_secs(poll_interval)).await;
         }
     });
 

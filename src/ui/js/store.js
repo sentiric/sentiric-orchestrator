@@ -38,7 +38,7 @@ export const Store = {
     },
 
     updateHistory(clusterData) {
-        const MAX_HISTORY = 40; // 40 veri noktası (Daha pürüzsüz grafik)
+        const MAX_HISTORY = 40; 
         
         Object.keys(clusterData).forEach(nodeName => {
             const services = clusterData[nodeName].services;

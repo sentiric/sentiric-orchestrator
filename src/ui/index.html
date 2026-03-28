@@ -13,13 +13,23 @@
 <body>
     <div class="app-wrapper">
         
+        <!-- HEADER (Mobile/Desktop) -->
+        <header class="top-bar mobile-header">
+            <div style="display:flex; align-items:center; gap:10px;">
+                <button id="btn-toggle-sidebar" class="icon-btn mobile-only" style="font-size:20px;">☰</button>
+                <div class="brand-logo" style="font-size:20px;">💠</div>
+                <div style="font-weight:900; letter-spacing:1px; font-size:14px;">NEXUS <span id="v-badge" style="color:var(--accent-blue); font-size:10px;">v6.0</span></div>
+            </div>
+            <div id="conn-status" class="conn-status offline">● CONNECTING...</div>
+        </header>
+
         <!-- SIDEBAR -->
-        <aside class="sidebar">
-            <div class="brand-area">
+        <aside class="sidebar" id="sidebar">
+            <div class="brand-area desktop-only">
                 <div class="brand-logo">💠</div>
                 <div class="brand-text">
-                    <h1>NEXUS <span id="v-badge">v5.5</span></h1>
-                    <span>ORCHESTRATOR</span>
+                    <h1>NEXUS</h1>
+                    <span>ORCHESTRATOR <span id="v-badge-desktop" style="color:var(--accent-blue)">v6.0</span></span>
                 </div>
             </div>
 
@@ -52,19 +62,24 @@
 
         <!-- MAIN AREA -->
         <main class="main-area">
-            <header class="top-bar">
+            <header class="top-bar desktop-only">
                 <div class="view-toggles">
                     <button id="btn-view-grid" class="view-btn active">SERVICES GRID</button>
                     <button id="btn-view-topology" class="view-btn">ARCHITECTURE MAP</button>
                 </div>
-                <div id="conn-status" class="conn-status offline">● CONNECTING...</div>
+                <div style="font-size:11px; font-weight:bold; color:#666;">GOVERNOR ACTIVE 👁️</div>
             </header>
 
-            <!-- VIEWS WRAPPER (Absolute Positioning for Scroll Fix) -->
+            <!-- VIEWS WRAPPER -->
             <div class="views-wrapper">
                 
                 <!-- GRID VIEW -->
                 <div id="view-grid" class="view-layer active">
+                    <!-- Mobil görünümde View geçiş butonları -->
+                    <div class="mobile-only view-toggles" style="padding:10px 20px; border-bottom:1px solid var(--border-dim);">
+                        <button id="btn-view-grid-mobile" class="view-btn active" style="flex:1;">GRID</button>
+                        <button id="btn-view-topology-mobile" class="view-btn" style="flex:1;">MAP</button>
+                    </div>
                     <div id="services-grid" class="services-grid">
                         <div style="color:#666; font-family:'JetBrains Mono'; padding: 20px;">Awaiting telemetry from nodes...</div>
                     </div>
@@ -82,15 +97,16 @@
         </main>
     </div>
 
-    <!-- MODAL -->
+    <!-- MODAL (LOGS & INSPECT) -->
     <div id="info-modal" class="modal-overlay">
         <div class="modal-content">
             <div class="modal-header">
                 <div class="modal-tabs">
                     <button class="tab-btn active" data-target="view-logs">LIVE TERMINAL</button>
                     <button class="tab-btn" data-target="view-inspect">DOCKER INSPECT</button>
+                    <button class="tab-btn" data-target="view-violations" id="tab-violations" style="display:none; color:var(--accent-red);">⚠️ VIOLATIONS</button>
                 </div>
-                <button id="log-modal-close" class="icon-btn">✕</button>
+                <button class="icon-btn modal-close">✕</button>
             </div>
             
             <div id="view-logs" class="modal-view active">
@@ -99,6 +115,10 @@
 
             <div id="view-inspect" class="modal-view">
                 <pre id="inspect-output" class="log-container" style="color:var(--accent-green);"></pre>
+            </div>
+
+            <div id="view-violations" class="modal-view">
+                <div id="violations-output" class="log-container" style="color:var(--accent-red); font-size:13px; line-height:1.6;"></div>
             </div>
         </div>
     </div>

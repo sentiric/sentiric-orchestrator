@@ -10,10 +10,16 @@ const ui = {
     modal: document.getElementById('info-modal'),
     logView: document.getElementById('view-logs'),
     inspectView: document.getElementById('view-inspect'),
+    violationsView: document.getElementById('view-violations'),
     inspectOutput: document.getElementById('inspect-output'),
-    logTitle: document.getElementById('log-modal-title'),
+    violationsOutput: document.getElementById('violations-output'),
+    
+    // View Buttons
     btnViewGrid: document.getElementById('btn-view-grid'),
     btnViewTopology: document.getElementById('btn-view-topology'),
+    btnViewGridMobile: document.getElementById('btn-view-grid-mobile'),
+    btnViewTopologyMobile: document.getElementById('btn-view-topology-mobile'),
+    
     viewGrid: document.getElementById('view-grid'),
     viewTopology: document.getElementById('view-topology'),
 
@@ -23,51 +29,66 @@ const ui = {
 
     init() {
         this.topology = new TopologyMap('topology-network');
+        this.bindEvents();
         
-        // --- View Geçişleri ---
-        this.btnViewGrid.onclick = () => {
-            this.btnViewGrid.classList.add('active');
-            this.btnViewTopology.classList.remove('active');
-            this.viewGrid.classList.add('active');
-            this.viewTopology.classList.remove('active');
-        };
-
-        this.btnViewTopology.onclick = () => {
-            this.btnViewTopology.classList.add('active');
-            this.btnViewGrid.classList.remove('active');
-            this.viewGrid.classList.remove('active');
-            this.viewTopology.classList.add('active');
-            
-            this.topology.draw().then(() => {
-                this.topology.updateLiveState(Store.state.cluster);
-            });
-        };
-
-        // --- Store Dinleyicisi ---
         Store.subscribe((state) => {
             requestAnimationFrame(() => {
                 this.renderSidebar(state);
                 this.renderSelectedNode(state);
                 
-                // Topolojiyi her zaman GLOBAL state ile güncelle
                 if (this.topology.isDrawn && this.viewTopology.classList.contains('active')) {
                     this.topology.updateLiveState(state.cluster);
                 }
             });
         });
-
-        this.bindEvents();
     },
 
     bindEvents() {
-        // Fetch System Config for Header
-        fetch('/api/config').then(r => r.json()).then(data => {
-            const badge = document.getElementById('v-badge');
-            if (badge) badge.innerText = `v${data.version}`;
-        }).catch(()=>{});
+        // --- Mobil Menü ---
+        const btnMenu = document.getElementById('mobile-menu-btn');
+        if (btnMenu) {
+            btnMenu.onclick = () => {
+                document.getElementById('sidebar').classList.toggle('open');
+            };
+        }
 
-        // Modals
-        document.getElementById('log-modal-close').onclick = () => this.hideModal();
+        // Kapatma işlemi (Dışarı tıklayınca menü kapansın)
+        document.addEventListener('click', (e) => {
+            const sidebar = document.getElementById('sidebar');
+            if (window.innerWidth <= 768 && sidebar && sidebar.classList.contains('open')) {
+                if (!sidebar.contains(e.target) && e.target.id !== 'mobile-menu-btn') {
+                    sidebar.classList.remove('open');
+                }
+            }
+        });
+
+        // --- View Toggles ---
+        const switchToGrid = () => {
+            if(this.btnViewGrid) this.btnViewGrid.classList.add('active');
+            if(this.btnViewTopology) this.btnViewTopology.classList.remove('active');
+            if(this.btnViewGridMobile) this.btnViewGridMobile.classList.add('active');
+            if(this.btnViewTopologyMobile) this.btnViewTopologyMobile.classList.remove('active');
+            this.viewGrid.classList.add('active');
+            this.viewTopology.classList.remove('active');
+        };
+
+        const switchToMap = () => {
+            if(this.btnViewTopology) this.btnViewTopology.classList.add('active');
+            if(this.btnViewGrid) this.btnViewGrid.classList.remove('active');
+            if(this.btnViewTopologyMobile) this.btnViewTopologyMobile.classList.add('active');
+            if(this.btnViewGridMobile) this.btnViewGridMobile.classList.remove('active');
+            this.viewGrid.classList.remove('active');
+            this.viewTopology.classList.add('active');
+            this.topology.draw().then(() => this.topology.updateLiveState(Store.state.cluster));
+        };
+
+        if(this.btnViewGrid) this.btnViewGrid.onclick = switchToGrid;
+        if(this.btnViewGridMobile) this.btnViewGridMobile.onclick = switchToGrid;
+        if(this.btnViewTopology) this.btnViewTopology.onclick = switchToMap;
+        if(this.btnViewTopologyMobile) this.btnViewTopologyMobile.onclick = switchToMap;
+
+        // --- Modals ---
+        document.querySelectorAll('.modal-close').forEach(btn => btn.onclick = () => this.hideModal());
         
         document.querySelectorAll('.modal-tabs .tab-btn').forEach(btn => {
             btn.onclick = (e) => {
@@ -83,9 +104,8 @@ const ui = {
             };
         });
 
-        // Actions
         document.getElementById('btn-prune').onclick = async () => {
-            if(confirm('🗑️ WARNING: This will prune stopped containers and dangling images on the LOCAL node. Proceed?')) {
+            if(confirm('🗑️ WARNING: This will prune stopped containers and dangling images. Proceed?')) {
                 await fetch('/api/system/prune', {method:'POST'});
             }
         };
@@ -94,29 +114,32 @@ const ui = {
             const res = await fetch('/api/export/llm');
             let text = await res.text();
             
-            // [YENİ EKLENEN]: Zaman Çizelgeli (Time-Series) CPU/RAM Geçmişini Rapora Ekleme
-            text += "\n\n## 4. TIME-SERIES RESOURCE HISTORY (Last 40 Ticks)\n";
-            text += "Bu tablo, servislerin zaman içindeki CPU ve RAM trendlerini gösterir. 'Memory Leak' veya 'CPU Spike' analizi için kullanın.\n\n";
-            
-            const history = window.Store.state.history;
-            for (const [id, data] of Object.entries(history)) {
-                // id formatı: "gcp-iowa-gw-01_proxy-service"
-                const cleanId = id.split('_').join(' -> ');
-                
-                // RAM değerlerini virgülle ayırarak tek satırda göster
-                const ramLine = data.ram.map(v => `${v}MB`).join(' -> ');
-                const cpuLine = data.cpu.map(v => `${v.toFixed(1)}%`).join(' -> ');
-                
-                text += `### Service: ${cleanId}\n`;
-                text += `- **RAM Trend:** [ ${ramLine} ]\n`;
-                text += `- **CPU Trend:** [ ${cpuLine} ]\n\n`;
-            }
-
             const a = document.createElement('a');
             a.href = window.URL.createObjectURL(new Blob([text], {type:'text/markdown'}));
             a.download = `nexus_diagnostic_${Date.now()}.md`;
             a.click();
         };
+
+        // Grid içi buton dinlemeleri (Delegation)
+        this.grid.addEventListener('click', (e) => {
+            const btnInfo = e.target.closest('.btn-info');
+            if (btnInfo) {
+                this.openModal(btnInfo.dataset.id, btnInfo.dataset.name);
+                return;
+            }
+            
+            const btnViolations = e.target.closest('.badge-quarantine');
+            if (btnViolations) {
+                const nodeName = Store.state.selectedNode;
+                const svcName = btnViolations.dataset.name;
+                const nodeData = Store.state.cluster[nodeName];
+                if (nodeData) {
+                    const svc = nodeData.services.find(s => s.name === svcName);
+                    if (svc) this.openViolationsModal(svc);
+                }
+                return;
+            }
+        });
     },
 
     renderSidebar(state) {
@@ -166,7 +189,6 @@ const ui = {
         const sorted = [...services].sort((a, b) => a.name.localeCompare(b.name));
         this.grid.innerHTML = sorted.map(svc => this.createCard(svc, state)).join('');
         
-        // Cizimler DOM guncellendikten sonra yapılmalı
         sorted.forEach(svc => {
             const hist = state.history[`${state.selectedNode}_${svc.name}`];
             if (hist) {
@@ -180,9 +202,7 @@ const ui = {
         const canvas = document.getElementById(canvasId);
         if (!canvas) return;
         const ctx = canvas.getContext('2d');
-        const w = canvas.width;
-        const h = canvas.height;
-        
+        const w = canvas.width; const h = canvas.height;
         ctx.clearRect(0, 0, w, h);
         let max = Math.max(...dataArray, 5); 
         const step = w / (dataArray.length - 1);
@@ -190,32 +210,45 @@ const ui = {
         ctx.beginPath();
         dataArray.forEach((val, i) => {
             const y = h - ((val / max) * h);
-            if (i === 0) ctx.moveTo(0, y);
-            else ctx.lineTo(i * step, y);
+            if (i === 0) ctx.moveTo(0, y); else ctx.lineTo(i * step, y);
         });
+        ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.closePath();
+        ctx.fillStyle = fillColor; ctx.fill();
 
-        // Fill
-        ctx.lineTo(w, h);
-        ctx.lineTo(0, h);
-        ctx.closePath();
-        ctx.fillStyle = fillColor;
-        ctx.fill();
-
-        // Stroke
         ctx.beginPath();
         dataArray.forEach((val, i) => {
             const y = h - ((val / max) * h);
-            if (i === 0) ctx.moveTo(0, y);
-            else ctx.lineTo(i * step, y);
+            if (i === 0) ctx.moveTo(0, y); else ctx.lineTo(i * step, y);
         });
-        ctx.strokeStyle = lineColor;
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
+        ctx.strokeStyle = lineColor; ctx.lineWidth = 1.5; ctx.stroke();
     },
 
     createCard(svc, state) {
+        // --- V6.0 HEALTH STATE RESOLUTION ---
+        let statusClass = 'status-offline';
+        let statusText = 'STOPPED';
+        let badgesHtml = '';
+
+        if (svc.health === 'Quarantined') {
+            statusClass = 'status-quarantined';
+            statusText = 'QUARANTINED';
+            badgesHtml += `<span class="badge badge-quarantine" data-name="${svc.name}">⚠️ ${svc.violations.length} VIOLATIONS</span>`;
+        } else if (svc.health === 'Draining') {
+            statusClass = 'status-draining';
+            statusText = 'DRAINING (UPDATING)';
+            badgesHtml += `<span class="badge badge-draining">⏳ GRACEFUL SHUTDOWN</span>`;
+        } else if (svc.health === 'RiskOom') {
+            statusClass = 'status-riskoom';
+            statusText = 'RUNNING (RISK)';
+            badgesHtml += `<span class="badge badge-oom">🧠 RAM LIMIT</span>`;
+        } else if (svc.health === 'Online') {
+            statusClass = 'status-online';
+            statusText = 'RUNNING';
+        }
+
+        if (svc.has_gpu) badgesHtml += `<span class="badge badge-gpu">GPU</span>`;
+
         const isUp = svc.status.toLowerCase().includes('up');
-        const statusClass = isUp ? 'up' : 'down';
         const isRemote = state.selectedNode !== state.localNodeName;
         
         let actions = '';
@@ -226,11 +259,15 @@ const ui = {
                 window.Store.dispatch('TOGGLE_AP_OPTIMISTIC', { node: '${state.selectedNode}', service: '${svc.name}', enabled: ${!svc.auto_pilot} });
                 fetch('/api/toggle-autopilot', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({service:'${svc.name}', enabled:${!svc.auto_pilot}})});
             `;
+            
+            // Eğer karantinadaysa veya draining ise butonları kilitle
+            const btnDisabled = (svc.health === 'Quarantined' || svc.health === 'Draining' || !isUp) ? 'disabled' : '';
+
             actions = `
                 <button class="btn" onclick="fetch('/api/service/${svc.short_id}/start', {method:'POST'})" ${isUp?'disabled':''}>▶</button>
-                <button class="btn" onclick="if(confirm('Stop ${svc.name}?')) fetch('/api/service/${svc.short_id}/stop', {method:'POST'})" ${!isUp?'disabled':''}>■</button>
-                <button class="btn" onclick="fetch('/api/service/${svc.short_id}/restart', {method:'POST'})" ${!isUp?'disabled':''}>↻</button>
-                <button class="btn" onclick="window.ui.openModal('${svc.short_id}', '${svc.name}')" style="flex:2">INFO</button>
+                <button class="btn" onclick="if(confirm('Stop ${svc.name}?')) fetch('/api/service/${svc.short_id}/stop', {method:'POST'})" ${btnDisabled}>■</button>
+                <button class="btn" onclick="fetch('/api/service/${svc.short_id}/restart', {method:'POST'})" ${btnDisabled}>↻</button>
+                <button class="btn btn-info" data-id="${svc.short_id}" data-name="${svc.name}" style="flex:2">INFO</button>
                 <button class="btn ${svc.auto_pilot?'btn-primary':''}" onclick="${apClick.replace(/\n/g, '')}">AP</button>
             `;
         }
@@ -239,10 +276,10 @@ const ui = {
             <div class="service-card ${statusClass}">
                 <div class="svc-header">
                     <div>
-                        <div class="svc-title">${svc.name} ${svc.has_gpu ? '<span class="gpu-badge">GPU</span>' : ''}</div>
+                        <div class="svc-title">${svc.name} ${badgesHtml}</div>
                         <span class="svc-image">${svc.image.split('@')[0]}</span>
                     </div>
-                    <div class="svc-status ${statusClass}">${isUp?'RUNNING':'STOPPED'}</div>
+                    <div class="svc-status" style="color:var(--text-main);">${statusText}</div>
                 </div>
                 <div class="svc-metrics">
                     <div class="metric-row">
@@ -261,17 +298,39 @@ const ui = {
 
     openModal(id, name) {
         this.currentId = id;
-        this.logTitle.innerText = `root@${name}:~#`;
         this.modal.style.display = 'flex';
         
         // Reset tabs
         document.querySelectorAll('.modal-tabs .tab-btn').forEach(b => b.classList.remove('active'));
         document.querySelectorAll('.modal-view').forEach(v => v.classList.remove('active'));
         
+        document.getElementById('tab-violations').style.display = 'none'; // Normalde gizle
         document.querySelector('.modal-tabs .tab-btn[data-target="view-logs"]').classList.add('active');
         document.getElementById('view-logs').classList.add('active');
         
-        this.startLogStream(this.currentId);
+        this.startLogStream(id);
+    },
+
+    openViolationsModal(svc) {
+        this.modal.style.display = 'flex';
+        
+        document.querySelectorAll('.modal-tabs .tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.modal-view').forEach(v => v.classList.remove('active'));
+
+        const vioTab = document.getElementById('tab-violations');
+        vioTab.style.display = 'block';
+        vioTab.classList.add('active');
+        document.getElementById('view-violations').classList.add('active');
+
+        let html = `<h3>🚫 QUARANTINE REPORT: ${svc.name}</h3><br>`;
+        html += `<p>This service has been flagged by the Sentinel Governor for architectural compliance violations.</p><br><ul>`;
+        svc.violations.forEach(v => {
+            html += `<li style="margin-bottom:10px;">${v}</li>`;
+        });
+        html += `</ul><br><p style="color:#666;">Action Required: Fix the environment variables (.env) or Docker configurations and restart the service.</p>`;
+        
+        this.violationsOutput.innerHTML = html;
+        if (this.logSocket) this.logSocket.close(); // Log akışını durdur
     },
 
     startLogStream(id) {
@@ -303,13 +362,12 @@ const ui = {
     hideModal() {
         this.modal.style.display = 'none';
         if (this.logSocket) this.logSocket.close();
-    }
+    },
 };
 
 window.Store = Store; 
 window.ui = ui;
 
-// Boot Sequence
 ui.init(); 
 
 new WebSocketStream(`ws://${window.location.host}/ws`, (msg) => {
