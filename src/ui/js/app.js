@@ -165,23 +165,23 @@ const ui = {
                 const btnAction = e.target.closest('.btn-api-action');
                 if (btnAction) {
                     const action = btnAction.dataset.action;
-                    const sid = btnAction.dataset.id;
-                    const sname = btnAction.dataset.name;
+                    const sname = btnAction.dataset.name; // ID yerine Name kullanıyoruz!
                     
-                    if (!sid || sid === 'null' || sid === 'undefined') return;
+                    if (!sname || sname === 'null' || sname === 'undefined') return;
 
                     if (action === 'start') {
-                        fetch(`/api/service/${sid}/start`, {method:'POST'}).catch(console.error);
+                        fetch(`/api/service/${sname}/start`, {method:'POST'}).catch(console.error);
                         btnAction.innerHTML = "⏳"; 
                     } else if (action === 'stop') {
                         if(confirm(`Stop ${sname}?`)) {
-                            fetch(`/api/service/${sid}/stop`, {method:'POST'}).catch(console.error);
+                            fetch(`/api/service/${sname}/stop`, {method:'POST'}).catch(console.error);
                             btnAction.innerHTML = "⏳";
                         }
                     } else if (action === 'restart') {
-                        fetch(`/api/service/${sid}/restart`, {method:'POST'}).catch(console.error);
+                        fetch(`/api/service/${sname}/restart`, {method:'POST'}).catch(console.error);
                         btnAction.innerHTML = "⏳";
                     } else if (action === 'force_pull') {
+
                         if(confirm(`Force Pull Latest Image & Recreate ${sname}?`)) {
                             fetch(`/api/update?service=${sname}`, {method:'POST'}).catch(console.error);
                             btnAction.innerHTML = "⏳";
