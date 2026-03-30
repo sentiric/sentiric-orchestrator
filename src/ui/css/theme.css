@@ -71,4 +71,6 @@
 .tab-btn.active { color: #fff; border-bottom-color: var(--accent-green); }
 .modal-view { flex: 1; display: none; flex-direction: column; overflow: hidden; background: #000; }
 .modal-view.active { display: flex; }
-.log-container { flex: 1; overflow-y: auto; padding: 16px; font-family: var(--font-mono); font-size: 11px; white-space: pre-wrap; word-break: break-all; }
+.log-container { flex: 1; overflow-y: auto; padding: 16px; font-family: var(--font-mono); font-size: 11px; white-space: pre-wrap; word-break: break-all;
+    /* siyah arkafonda gorunmuyordu - daha sonra ortama duyarlı tema uygulanmalı */
+    color: aqua !important}

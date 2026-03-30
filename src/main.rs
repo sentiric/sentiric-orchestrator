@@ -5,7 +5,8 @@ mod adapters;
 mod api;
 mod telemetry; 
 
-use std::{sync::Arc, collections::HashMap, time::Duration};
+// [ARCH-COMPLIANCE] HashSet eklendi
+use std::{sync::Arc, collections::{HashMap, HashSet}, time::Duration};
 use tokio::sync::{Mutex, broadcast};
 use tracing::info; 
 use tracing::Instrument; 
@@ -18,7 +19,7 @@ use crate::adapters::docker::DockerAdapter;
 use crate::adapters::system::SystemMonitor;
 use crate::core::domain::{ServiceInstance, NodeStats, ClusterReport};
 use crate::telemetry::SutsFormatter;
-use crate::core::governor::Governor; // Uyarı giderildi (Kullanımda)
+use crate::core::governor::Governor;
 
 struct CpuStatsCache {
     cpu_usage: u64,
@@ -32,6 +33,8 @@ pub struct AppState {
     pub node_stats_cache: Mutex<NodeStats>,
     pub cluster_cache: Mutex<HashMap<String, ClusterReport>>, 
     pub tx: Arc<broadcast::Sender<String>>,
+    // [ARCH-COMPLIANCE] Çoklu güncellemeyi (Race Condition) önleyen kilit haritası
+    pub update_locks: Mutex<HashSet<String>>, 
 }
 
 #[tokio::main]
@@ -62,7 +65,7 @@ async fn main() -> anyhow::Result<()> {
         service.version = env!("CARGO_PKG_VERSION"),
         node.name = %cfg.node_name,
         mode = if cfg.upstream_url.is_some() { "EDGE" } else { "MASTER" },
-        "💠 SENTIRIC ORCHESTRATOR v6.0 (NEXUS GOVERNOR) Booting..."
+        "💠 SENTIRIC ORCHESTRATOR v6.4.0 (NEXUS GOVERNOR) Booting..."
     );
 
     let (tx, _) = broadcast::channel::<String>(100);
@@ -81,6 +84,7 @@ async fn main() -> anyhow::Result<()> {
         node_stats_cache: Mutex::new(NodeStats::default()),
         cluster_cache: Mutex::new(HashMap::new()),
         tx: tx.clone(),
+        update_locks: Mutex::new(HashSet::new()), // Kilit başlatıldı
     });
 
     // 1. SYSTEM MONITOR
@@ -124,7 +128,6 @@ async fn main() -> anyhow::Result<()> {
 
         loop {
             loop_counter += 1;
-            // [HIZ ÇÖZÜMÜ]: Artık her döngüde stats çekiyoruz (one_shot = true ile)
             let fetch_heavy_metrics = true; 
             let do_update_check = loop_counter % 12 == 0; 
             let node_total_ram = scan_state.node_stats_cache.lock().await.ram_total;
@@ -145,10 +148,9 @@ async fn main() -> anyhow::Result<()> {
 
                         let mut cpu_percent = 0.0;
                         let mut mem_usage_mb = 0;
-                        let mut gpu_mem_usage_mb = 0; // İleride NVIDIA-SMI'dan doldurulacak
+                        let mut gpu_mem_usage_mb = 0; 
                         
                         if is_up && fetch_heavy_metrics {
-                            // one_shot: true Docker'ı yormadan anlık snapshot alır
                             if let Ok(stats) = scan_state.docker.get_container_stats(&container_id).await {
                                 let mem = &stats.memory_stats;
                                 mem_usage_mb = mem.usage.unwrap_or(0) / 1024 / 1024;
@@ -187,13 +189,38 @@ async fn main() -> anyhow::Result<()> {
 
                         let env_vars = env_cache.get(&container_id).cloned().unwrap_or_default();
                         let violations = Governor::audit_compliance(&name, &env_vars);
-                        let health = Governor::evaluate_health(&status_str, mem_usage_mb, node_total_ram, &violations);
+                        
+                        // [MİMARİ DÜZELTME]: Servis eğer "Update Lock" içindeyse Draining statüsünde göster
+                        let is_locked = scan_state.update_locks.lock().await.contains(&name);
+                        let health = if is_locked {
+                            crate::core::domain::HealthStatus::Draining
+                        } else {
+                            Governor::evaluate_health(&status_str, mem_usage_mb, node_total_ram, &violations)
+                        };
 
                         if is_auto_pilot && do_update_check {
-                            let docker_adapter = &scan_state.docker;
-                            let svc_name = name.clone();
-                            let d_adapter = docker_adapter.clone();
-                            tokio::spawn(async move { let _ = d_adapter.check_and_update_service(&svc_name).await; });
+                            // [MİMARİ KORUMA] Yarış durumunu ve DDoS'u engelleyen Mutex Lock
+                            let mut locks = scan_state.update_locks.lock().await;
+                            if !locks.contains(&name) {
+                                locks.insert(name.clone()); // Kilidi al
+                                drop(locks); // Diğer iterasyonları bloklamamak için kilidi serbest bırak
+                                
+                                let svc_name = name.clone();
+                                let d_adapter = scan_state.docker.clone();
+                                let state_clone = scan_state.clone();
+                                
+                                tokio::spawn(async move { 
+                                    // Güncelleme bitene kadar senkron şekilde bekle
+                                    let _ = d_adapter.check_and_update_service(&svc_name).await; 
+                                    
+                                    // İşlem bittiğinde kilidi kaldır
+                                    let mut release_locks = state_clone.update_locks.lock().await;
+                                    release_locks.remove(&svc_name);
+                                    tracing::info!(event="UPDATE_LOCK_RELEASED", service=%svc_name, "Update lock released for {}", svc_name);
+                                });
+                            } else {
+                                tracing::debug!(event="UPDATE_IN_PROGRESS_SKIPPED", service=%name, "Update already in progress. Skipping duplicate trigger.");
+                            }
                         }
 
                         let has_gpu = name.contains("llm") || name.contains("stt") || name.contains("tts");
@@ -207,7 +234,7 @@ async fn main() -> anyhow::Result<()> {
                             node: scan_node.clone(),
                             cpu_usage: cpu_percent,
                             mem_usage: mem_usage_mb,
-                            gpu_mem_usage: gpu_mem_usage_mb, // Şimdilik 0, GPU mapper yazılınca dolacak
+                            gpu_mem_usage: gpu_mem_usage_mb, 
                             has_gpu, 
                             health,
                             violations,
@@ -218,7 +245,6 @@ async fn main() -> anyhow::Result<()> {
                 }
                 Err(_) => { } 
             }
-            // Bekleme süresini AppConfig'deki interval'e bağladık (Varsayılan 3-5 saniye olmalı)
             tokio::time::sleep(std::time::Duration::from_secs(poll_interval)).await;
         }
     });

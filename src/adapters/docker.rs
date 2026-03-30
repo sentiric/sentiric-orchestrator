@@ -119,7 +119,7 @@ impl DockerAdapter {
         Ok(msg)
     }
 
-        // --- UPDATE ENGINE (V6.0 GRACEFUL DRAIN) ---
+    // --- UPDATE ENGINE (V6.4 GRACEFUL DRAIN WITH TIMEOUT PROTECTION) ---
     pub async fn check_and_update_service(&self, svc_name: &str) -> Result<bool> {
         let docker = &self.client;
         let inspect = docker.inspect_container(svc_name, None::<InspectContainerOptions>).await
@@ -176,24 +176,35 @@ impl DockerAdapter {
         };
 
         // 3. ZERO-DOWNTIME GRACEFUL SHUTDOWN (Dökülme/Drain)
-        info!(event="CONTAINER_DRAINING", service=%svc_name, "🛑 Sending SIGTERM for graceful drain (Timeout: 1 Hour): [{}]", svc_name);
+        // [MİMARİ KORUMA]: Timeout süresi 1 Saatten -> 60 Saniyeye indirildi!
+        info!(event="CONTAINER_DRAINING", service=%svc_name, "🛑 Sending SIGTERM for graceful drain (Timeout: 60 Seconds): [{}]", svc_name);
         
-        let docker_clone = docker.clone();
-        let svc_name_clone = svc_name.to_string();
+        // [MİMARİ KORUMA]: tokio::spawn KALDIRILDI! İşlemler sırayla (Linear) yapılacak.
+        let stop_opts = Some(StopContainerOptions { t: 60 });
+        match docker.stop_container(svc_name, stop_opts).await {
+            Ok(_) => info!(event="CONTAINER_STOPPED", service=%svc_name, "🛑 Container stopped successfully."),
+            Err(e) => warn!(event="CONTAINER_STOP_ERROR", service=%svc_name, error=%e, "⚠️ Error while stopping container (might already be stopped): {}", e),
+        }
+
+        let remove_opts = Some(RemoveContainerOptions { force: true, ..Default::default() });
+        match docker.remove_container(svc_name, remove_opts).await {
+            Ok(_) => info!(event="CONTAINER_REMOVED", service=%svc_name, "💀 Old container removed."),
+            Err(e) => warn!(event="CONTAINER_REMOVE_ERROR", service=%svc_name, error=%e, "⚠️ Error while removing container: {}", e),
+        }
         
-        // Asenkron görev olarak başlatıyoruz çünkü 1 saat (3600 sn) bekleyebilir.
-        // Konteyner çağrıları bitince kendi exit(0) yaparsa Docker hemen kapatır.
-        tokio::spawn(async move {
-            let _ = docker_clone.stop_container(&svc_name_clone, Some(StopContainerOptions { t: 3600 })).await;
-            let _ = docker_clone.remove_container(&svc_name_clone, Some(RemoveContainerOptions { force: true, ..Default::default() })).await;
-            
-            info!(event="CONTAINER_DRAIN_COMPLETE", service=%svc_name_clone, "💀 Old container removed. Creating updated one: [{}]", svc_name_clone);
-            
-            if let Ok(_) = docker_clone.create_container(Some(CreateContainerOptions { name: svc_name_clone.clone(), platform: None }), config).await {
-                let _ = docker_clone.start_container(&svc_name_clone, None::<StartContainerOptions<String>>).await;
-                info!(event="AUTO_PILOT_SUCCESS", service=%svc_name_clone, "✅ [{}] updated and started.", svc_name_clone);
-            }
-        });
+        info!(event="CONTAINER_RECREATING", service=%svc_name, "✨ Creating updated container: [{}]", svc_name);
+        
+        if let Err(e) = docker.create_container(Some(CreateContainerOptions { name: svc_name.to_string(), platform: None }), config).await {
+            error!(event="CONTAINER_CREATE_ERROR", service=%svc_name, error=%e, "❌ Failed to create container: {}", e);
+            return Err(anyhow::anyhow!("Container create failed"));
+        }
+
+        if let Err(e) = docker.start_container(svc_name, None::<StartContainerOptions<String>>).await {
+            error!(event="CONTAINER_START_ERROR", service=%svc_name, error=%e, "❌ Failed to start container: {}", e);
+            return Err(anyhow::anyhow!("Container start failed"));
+        }
+        
+        info!(event="AUTO_PILOT_SUCCESS", service=%svc_name, "✅ [{}] updated and started successfully.", svc_name);
 
         Ok(true)
     }
