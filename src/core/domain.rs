@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum HealthStatus {
     Online,
-    Draining,      
-    Warning,       // [YENİ]: Kırmızı Quarantined yerine Turuncu İkaz
-    RiskOom,       
+    Draining,
+    Warning, // [YENİ]: Kırmızı Quarantined yerine Turuncu İkaz
+    RiskOom,
     Offline,
 }
 
@@ -19,19 +19,19 @@ pub struct ServiceInstance {
     pub auto_pilot: bool,
     pub node: String,
     pub cpu_usage: f64,
-    pub mem_usage: u64, 
+    pub mem_usage: u64,
     pub gpu_mem_usage: u64, // [YENİ]: Konteyner bazlı GPU RAM (MB)
     pub has_gpu: bool,
-    
+
     pub health: HealthStatus,
-    pub violations: Vec<String>, 
+    pub violations: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct NodeStats {
     pub name: String,
     pub cpu_usage: f32,
-    pub ram_used: u64, // MB
+    pub ram_used: u64,  // MB
     pub ram_total: u64, // MB
     pub gpu_usage: f32,
     pub gpu_mem_used: u64,
@@ -55,8 +55,8 @@ pub struct ActionParams {
 
 #[derive(Deserialize)]
 pub struct ToggleParams {
-    pub service: String, 
-    pub enabled: bool 
+    pub service: String,
+    pub enabled: bool,
 }
 
 // --- TOPOLOJİ MODELLERİ ---
@@ -64,7 +64,7 @@ pub struct ToggleParams {
 pub struct TopologyNode {
     pub id: String,
     pub label: String,
-    pub group: String, 
+    pub group: String,
 }
 
 #[derive(Serialize, Clone, Debug)]

@@ -1,25 +1,29 @@
 // src/main.rs
-mod config;
-mod core;
 mod adapters;
 mod api;
-mod telemetry; 
+mod config;
+mod core;
+mod telemetry;
 
 // [ARCH-COMPLIANCE] HashSet eklendi
-use std::{sync::Arc, collections::{HashMap, HashSet}, time::Duration};
-use tokio::sync::{Mutex, broadcast};
-use tracing::info; 
-use tracing::Instrument; 
-use tracing_subscriber::{fmt, prelude::*, EnvFilter, Registry};
 use bollard::container::ListContainersOptions;
 use reqwest::Client;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+    time::Duration,
+};
+use tokio::sync::{broadcast, Mutex};
+use tracing::info;
+use tracing::Instrument;
+use tracing_subscriber::{fmt, prelude::*, EnvFilter, Registry};
 
-use crate::config::AppConfig;
 use crate::adapters::docker::DockerAdapter;
 use crate::adapters::system::SystemMonitor;
-use crate::core::domain::{ServiceInstance, NodeStats, ClusterReport};
-use crate::telemetry::SutsFormatter;
+use crate::config::AppConfig;
+use crate::core::domain::{ClusterReport, NodeStats, ServiceInstance};
 use crate::core::governor::Governor;
+use crate::telemetry::SutsFormatter;
 
 struct CpuStatsCache {
     cpu_usage: u64,
@@ -31,10 +35,10 @@ pub struct AppState {
     pub auto_pilot_config: Mutex<HashMap<String, bool>>,
     pub services_cache: Mutex<HashMap<String, ServiceInstance>>,
     pub node_stats_cache: Mutex<NodeStats>,
-    pub cluster_cache: Mutex<HashMap<String, ClusterReport>>, 
+    pub cluster_cache: Mutex<HashMap<String, ClusterReport>>,
     pub tx: Arc<broadcast::Sender<String>>,
     // [ARCH-COMPLIANCE] Çoklu güncellemeyi (Race Condition) önleyen kilit haritası
-    pub update_locks: Mutex<HashSet<String>>, 
+    pub update_locks: Mutex<HashSet<String>>,
 }
 
 #[tokio::main]
@@ -42,9 +46,10 @@ async fn main() -> anyhow::Result<()> {
     let cfg = AppConfig::load();
 
     let rust_log_env = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
-    let env_filter = EnvFilter::try_from_default_env().or_else(|_| EnvFilter::try_new(&rust_log_env))?;
+    let env_filter =
+        EnvFilter::try_from_default_env().or_else(|_| EnvFilter::try_new(&rust_log_env))?;
     let subscriber = Registry::default().with(env_filter);
-    
+
     let log_format = std::env::var("LOG_FORMAT").unwrap_or_else(|_| "json".to_string());
 
     if log_format == "json" {
@@ -53,9 +58,11 @@ async fn main() -> anyhow::Result<()> {
             env!("CARGO_PKG_VERSION").to_string(),
             cfg.env.clone(),
             cfg.node_name.clone(),
-            cfg.tenant_id.clone(), 
+            cfg.tenant_id.clone(),
         );
-        subscriber.with(fmt::layer().event_format(suts_formatter)).init();
+        subscriber
+            .with(fmt::layer().event_format(suts_formatter))
+            .init();
     } else {
         subscriber.with(fmt::layer().compact()).init();
     }
@@ -75,7 +82,9 @@ async fn main() -> anyhow::Result<()> {
     let mut sys_mon = SystemMonitor::new(cfg.node_name.clone());
 
     let mut initial_ap = HashMap::new();
-    for svc in &cfg.auto_pilot_services { initial_ap.insert(svc.clone(), true); }
+    for svc in &cfg.auto_pilot_services {
+        initial_ap.insert(svc.clone(), true);
+    }
 
     let state = Arc::new(AppState {
         docker: docker.clone(),
@@ -91,7 +100,7 @@ async fn main() -> anyhow::Result<()> {
     let mon_state = state.clone();
     let mon_node = cfg.node_name.clone();
     let mon_tx = tx.clone();
-    
+
     tokio::spawn(async move {
         loop {
             let stats = sys_mon.snapshot();
@@ -99,18 +108,30 @@ async fn main() -> anyhow::Result<()> {
             *node_cache = stats.clone();
             drop(node_cache);
 
-            let svcs = mon_state.services_cache.lock().await.values().cloned().collect();
+            let svcs = mon_state
+                .services_cache
+                .lock()
+                .await
+                .values()
+                .cloned()
+                .collect();
             let report = ClusterReport {
                 node: mon_node.clone(),
                 stats: stats,
                 services: svcs,
                 timestamp: chrono::Utc::now().to_rfc3339(),
             };
-            
-            mon_state.cluster_cache.lock().await.insert(mon_node.clone(), report);
+
+            mon_state
+                .cluster_cache
+                .lock()
+                .await
+                .insert(mon_node.clone(), report);
             let cluster_map = mon_state.cluster_cache.lock().await.clone();
-            let _ = mon_tx.send(serde_json::json!({ "type": "cluster_update", "data": cluster_map }).to_string());
-            
+            let _ = mon_tx.send(
+                serde_json::json!({ "type": "cluster_update", "data": cluster_map }).to_string(),
+            );
+
             tokio::time::sleep(Duration::from_secs(3)).await;
         }
     });
@@ -118,7 +139,7 @@ async fn main() -> anyhow::Result<()> {
     // 2. DOCKER SCAN & GOVERNANCE LOOP
     let scan_state = state.clone();
     let scan_node = cfg.node_name.clone();
-    let poll_interval = cfg.poll_interval; 
+    let poll_interval = cfg.poll_interval;
 
     tokio::spawn(async move {
         let client = scan_state.docker.get_client();
@@ -128,18 +149,32 @@ async fn main() -> anyhow::Result<()> {
 
         loop {
             loop_counter += 1;
-            let fetch_heavy_metrics = true; 
-            let do_update_check = loop_counter % 12 == 0; 
+            let fetch_heavy_metrics = true;
+            let do_update_check = loop_counter % 12 == 0;
             let node_total_ram = scan_state.node_stats_cache.lock().await.ram_total;
 
-            match client.list_containers(Some(ListContainersOptions::<String> { all: true, ..Default::default() })).await {
+            match client
+                .list_containers(Some(ListContainersOptions::<String> {
+                    all: true,
+                    ..Default::default()
+                }))
+                .await
+            {
                 Ok(containers) => {
                     let ap_guard = scan_state.auto_pilot_config.lock().await;
                     let mut cache = scan_state.services_cache.lock().await;
 
                     for c in containers {
-                        let name = c.names.unwrap_or_default().first().cloned().unwrap_or_default().replace("/", "");
-                        if name.is_empty() { continue; }
+                        let name = c
+                            .names
+                            .unwrap_or_default()
+                            .first()
+                            .cloned()
+                            .unwrap_or_default()
+                            .replace("/", "");
+                        if name.is_empty() {
+                            continue;
+                        }
 
                         let is_auto_pilot = *ap_guard.get(&name).unwrap_or(&false);
                         let container_id = c.id.clone().unwrap_or_default();
@@ -148,37 +183,58 @@ async fn main() -> anyhow::Result<()> {
 
                         let mut cpu_percent = 0.0;
                         let mut mem_usage_mb = 0;
-                        let mut gpu_mem_usage_mb = 0; 
-                        
+                        let mut gpu_mem_usage_mb = 0;
+
                         if is_up && fetch_heavy_metrics {
-                            if let Ok(stats) = scan_state.docker.get_container_stats(&container_id).await {
+                            if let Ok(stats) =
+                                scan_state.docker.get_container_stats(&container_id).await
+                            {
                                 let mem = &stats.memory_stats;
                                 mem_usage_mb = mem.usage.unwrap_or(0) / 1024 / 1024;
                                 let cpu = &stats.cpu_stats;
                                 let pre_cpu = &stats.precpu_stats;
                                 let cpu_total = cpu.cpu_usage.total_usage;
                                 let system_total = cpu.system_cpu_usage.unwrap_or(0);
-                                
-                                let (prev_cpu_total, prev_system_total) = if let Some(cached) = cpu_cache.get(&container_id) {
-                                    (cached.cpu_usage, cached.system_usage)
-                                } else {
-                                    (pre_cpu.cpu_usage.total_usage, pre_cpu.system_cpu_usage.unwrap_or(0))
-                                };
-                                
+
+                                let (prev_cpu_total, prev_system_total) =
+                                    if let Some(cached) = cpu_cache.get(&container_id) {
+                                        (cached.cpu_usage, cached.system_usage)
+                                    } else {
+                                        (
+                                            pre_cpu.cpu_usage.total_usage,
+                                            pre_cpu.system_cpu_usage.unwrap_or(0),
+                                        )
+                                    };
+
                                 if system_total > prev_system_total && cpu_total > prev_cpu_total {
                                     let cpu_delta = (cpu_total - prev_cpu_total) as f64;
                                     let system_delta = (system_total - prev_system_total) as f64;
                                     let online_cpus = cpu.online_cpus.unwrap_or(1) as f64;
-                                    if system_delta > 0.0 { cpu_percent = (cpu_delta / system_delta) * online_cpus * 100.0; }
+                                    if system_delta > 0.0 {
+                                        cpu_percent =
+                                            (cpu_delta / system_delta) * online_cpus * 100.0;
+                                    }
                                 }
-                                cpu_cache.insert(container_id.clone(), CpuStatsCache { cpu_usage: cpu_total, system_usage: system_total });
+                                cpu_cache.insert(
+                                    container_id.clone(),
+                                    CpuStatsCache {
+                                        cpu_usage: cpu_total,
+                                        system_usage: system_total,
+                                    },
+                                );
                             }
                         } else if !is_up {
                             cpu_cache.remove(&container_id);
                         }
 
                         if !env_cache.contains_key(&container_id) && is_up {
-                            if let Ok(inspect) = client.inspect_container(&container_id, None::<bollard::container::InspectContainerOptions>).await {
+                            if let Ok(inspect) = client
+                                .inspect_container(
+                                    &container_id,
+                                    None::<bollard::container::InspectContainerOptions>,
+                                )
+                                .await
+                            {
                                 if let Some(config) = inspect.config {
                                     if let Some(env) = config.env {
                                         env_cache.insert(container_id.clone(), env);
@@ -189,13 +245,18 @@ async fn main() -> anyhow::Result<()> {
 
                         let env_vars = env_cache.get(&container_id).cloned().unwrap_or_default();
                         let violations = Governor::audit_compliance(&name, &env_vars);
-                        
+
                         // [MİMARİ DÜZELTME]: Servis eğer "Update Lock" içindeyse Draining statüsünde göster
                         let is_locked = scan_state.update_locks.lock().await.contains(&name);
                         let health = if is_locked {
                             crate::core::domain::HealthStatus::Draining
                         } else {
-                            Governor::evaluate_health(&status_str, mem_usage_mb, node_total_ram, &violations)
+                            Governor::evaluate_health(
+                                &status_str,
+                                mem_usage_mb,
+                                node_total_ram,
+                                &violations,
+                            )
                         };
 
                         if is_auto_pilot && do_update_check {
@@ -204,15 +265,15 @@ async fn main() -> anyhow::Result<()> {
                             if !locks.contains(&name) {
                                 locks.insert(name.clone()); // Kilidi al
                                 drop(locks); // Diğer iterasyonları bloklamamak için kilidi serbest bırak
-                                
+
                                 let svc_name = name.clone();
                                 let d_adapter = scan_state.docker.clone();
                                 let state_clone = scan_state.clone();
-                                
-                                tokio::spawn(async move { 
+
+                                tokio::spawn(async move {
                                     // Güncelleme bitene kadar senkron şekilde bekle
-                                    let _ = d_adapter.check_and_update_service(&svc_name).await; 
-                                    
+                                    let _ = d_adapter.check_and_update_service(&svc_name).await;
+
                                     // İşlem bittiğinde kilidi kaldır
                                     let mut release_locks = state_clone.update_locks.lock().await;
                                     release_locks.remove(&svc_name);
@@ -223,7 +284,8 @@ async fn main() -> anyhow::Result<()> {
                             }
                         }
 
-                        let has_gpu = name.contains("llm") || name.contains("stt") || name.contains("tts");
+                        let has_gpu =
+                            name.contains("llm") || name.contains("stt") || name.contains("tts");
 
                         let svc = ServiceInstance {
                             name: name.clone(),
@@ -234,16 +296,16 @@ async fn main() -> anyhow::Result<()> {
                             node: scan_node.clone(),
                             cpu_usage: cpu_percent,
                             mem_usage: mem_usage_mb,
-                            gpu_mem_usage: gpu_mem_usage_mb, 
-                            has_gpu, 
+                            gpu_mem_usage: gpu_mem_usage_mb,
+                            has_gpu,
                             health,
                             violations,
                         };
-                        
+
                         cache.insert(name, svc);
                     }
                 }
-                Err(_) => { } 
+                Err(_) => {}
             }
             tokio::time::sleep(std::time::Duration::from_secs(poll_interval)).await;
         }
@@ -258,25 +320,38 @@ async fn main() -> anyhow::Result<()> {
         tokio::spawn(async move {
             info!(event="UPSTREAM_LINK_INIT", url=%upstream_url, "Upstream raporlama başlatılıyor.");
             loop {
-                let svcs: Vec<ServiceInstance> = up_state.services_cache.lock().await.values().cloned().collect();
+                let svcs: Vec<ServiceInstance> = up_state
+                    .services_cache
+                    .lock()
+                    .await
+                    .values()
+                    .cloned()
+                    .collect();
                 let stats: NodeStats = up_state.node_stats_cache.lock().await.clone();
                 let payload = ClusterReport {
                     node: node_name.clone(),
                     stats,
                     services: svcs,
-                    timestamp: chrono::Utc::now().to_rfc3339()
+                    timestamp: chrono::Utc::now().to_rfc3339(),
                 };
 
-                let trace_id = format!("tr-{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_micros());
+                let trace_id = format!(
+                    "tr-{:x}",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_micros()
+                );
                 let span = tracing::info_span!("upstream_push", trace_id = %trace_id);
 
-                let _ = http_client.post(&upstream_url)
+                let _ = http_client
+                    .post(&upstream_url)
                     .header("x-trace-id", &trace_id)
                     .json(&payload)
                     .send()
-                    .instrument(span) 
+                    .instrument(span)
                     .await;
-                
+
                 tokio::time::sleep(Duration::from_secs(10)).await;
             }
         });

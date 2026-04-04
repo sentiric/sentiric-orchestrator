@@ -6,22 +6,35 @@ pub struct Governor;
 impl Governor {
     pub fn audit_compliance(service_name: &str, env_vars: &[String]) -> Vec<String> {
         let mut violations = Vec::new();
-        if !service_name.contains("-service") { return violations; }
+        if !service_name.contains("-service") {
+            return violations;
+        }
 
         let has_tenant = env_vars.iter().any(|v| v.starts_with("TENANT_ID="));
         let has_mtls_cert = env_vars.iter().any(|v| v.starts_with("TLS_CERT_PATH="));
-        let has_mtls_ca = env_vars.iter().any(|v| v.starts_with("TLS_CA_PATH=") || v.starts_with("GRPC_TLS_CA_PATH="));
+        let has_mtls_ca = env_vars
+            .iter()
+            .any(|v| v.starts_with("TLS_CA_PATH=") || v.starts_with("GRPC_TLS_CA_PATH="));
 
         if !has_mtls_cert || !has_mtls_ca {
-            violations.push("[SOP-01] Missing mTLS certificates. Unencrypted traffic risk.".to_string());
+            violations
+                .push("[SOP-01] Missing mTLS certificates. Unencrypted traffic risk.".to_string());
         }
-        if !service_name.contains("observer") && !service_name.contains("orchestrator") && !has_tenant {
+        if !service_name.contains("observer")
+            && !service_name.contains("orchestrator")
+            && !has_tenant
+        {
             violations.push("[ARCH-03] Missing TENANT_ID. Strict isolation violated.".to_string());
         }
         violations
     }
 
-    pub fn evaluate_health(status_str: &str, mem_mb: u64, node_total_ram_mb: u64, violations: &[String]) -> HealthStatus {
+    pub fn evaluate_health(
+        status_str: &str,
+        mem_mb: u64,
+        node_total_ram_mb: u64,
+        violations: &[String],
+    ) -> HealthStatus {
         if !status_str.to_lowercase().contains("up") {
             return HealthStatus::Offline;
         }

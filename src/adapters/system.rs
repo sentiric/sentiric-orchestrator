@@ -1,6 +1,6 @@
-use sysinfo::System;
-use std::process::Command;
 use crate::core::domain::NodeStats;
+use std::process::Command;
+use sysinfo::System;
 
 pub struct SystemMonitor {
     sys: System,
@@ -36,7 +36,10 @@ impl SystemMonitor {
 
     fn get_gpu_metrics(&self) -> (f32, u64, u64) {
         let output = Command::new("nvidia-smi")
-            .args(&["--query-gpu=utilization.gpu,memory.used,memory.total", "--format=csv,noheader,nounits"])
+            .args(&[
+                "--query-gpu=utilization.gpu,memory.used,memory.total",
+                "--format=csv,noheader,nounits",
+            ])
             .output();
 
         if let Ok(out) = output {

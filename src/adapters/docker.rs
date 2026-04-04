@@ -1,15 +1,15 @@
 // src/adapters/docker.rs
-use bollard::Docker;
+use anyhow::Result;
 use bollard::container::{
-    StopContainerOptions, RemoveContainerOptions, Config, CreateContainerOptions, 
-    StartContainerOptions, InspectContainerOptions, RestartContainerOptions, 
-    LogsOptions, LogOutput, Stats, StatsOptions, PruneContainersOptions
+    Config, CreateContainerOptions, InspectContainerOptions, LogOutput, LogsOptions,
+    PruneContainersOptions, RemoveContainerOptions, RestartContainerOptions, StartContainerOptions,
+    Stats, StatsOptions, StopContainerOptions,
 };
 use bollard::image::{CreateImageOptions, PruneImagesOptions};
-use futures_util::{StreamExt, Stream};
-use anyhow::Result;
-use tracing::{info, error, debug, warn};
+use bollard::Docker;
+use futures_util::{Stream, StreamExt};
 use std::default::Default;
+use tracing::{debug, error, info, warn};
 
 #[derive(Clone)]
 pub struct DockerAdapter {
@@ -22,53 +22,70 @@ impl DockerAdapter {
         let client = Docker::connect_with_unix(socket, 120, bollard::API_DEFAULT_VERSION)
             .or_else(|_| Docker::connect_with_local_defaults())
             .map_err(|e| anyhow::anyhow!("Docker Bağlantı Hatası: {}", e))?;
-        
+
         Ok(Self { client, node_name })
     }
 
     pub fn get_client(&self) -> Docker {
         self.client.clone()
     }
-    
+
     // --- LIFECYCLE ---
     pub async fn start_service(&self, svc_id: &str) -> Result<()> {
         info!(event="CONTAINER_START", node.name=%self.node_name, container.id=%svc_id, "▶️ Starting container: {}", svc_id);
-        self.client.start_container(svc_id, None::<StartContainerOptions<String>>).await?;
+        self.client
+            .start_container(svc_id, None::<StartContainerOptions<String>>)
+            .await?;
         Ok(())
     }
 
     pub async fn stop_service(&self, svc_id: &str) -> Result<()> {
         info!(event="CONTAINER_STOP", node.name=%self.node_name, container.id=%svc_id, "🛑 Stopping container: {}", svc_id);
-        self.client.stop_container(svc_id, Some(StopContainerOptions { t: 10 })).await?;
+        self.client
+            .stop_container(svc_id, Some(StopContainerOptions { t: 10 }))
+            .await?;
         Ok(())
     }
-    
+
     pub async fn restart_service(&self, svc_id: &str) -> Result<()> {
         info!(event="CONTAINER_RESTART", node.name=%self.node_name, container.id=%svc_id, "🔄 Restarting container: {}", svc_id);
-        self.client.restart_container(svc_id, Some(RestartContainerOptions { t: 10 })).await?;
+        self.client
+            .restart_container(svc_id, Some(RestartContainerOptions { t: 10 }))
+            .await?;
         Ok(())
     }
 
     // --- INFO & LOGS ---
-    pub fn get_log_stream(&self, svc_id: &str) -> impl Stream<Item = Result<LogOutput, bollard::errors::Error>> {
+    pub fn get_log_stream(
+        &self,
+        svc_id: &str,
+    ) -> impl Stream<Item = Result<LogOutput, bollard::errors::Error>> {
         debug!(event="STREAM_LOGS", node.name=%self.node_name, container.id=%svc_id, "📡 Opening live log stream for container: {}", svc_id);
-        let options = Some(LogsOptions::<String>{
-            follow: true, stdout: true, stderr: true, tail: "200".to_string(), ..Default::default()
+        let options = Some(LogsOptions::<String> {
+            follow: true,
+            stdout: true,
+            stderr: true,
+            tail: "200".to_string(),
+            ..Default::default()
         });
         self.client.logs(svc_id, options)
     }
 
     pub async fn get_logs_snapshot(&self, svc_id: &str) -> String {
         debug!(event="SNAPSHOT_LOGS", node.name=%self.node_name, container.id=%svc_id, "📸 Fetching log snapshot for container: {}", svc_id);
-        let options = Some(LogsOptions::<String>{
-            follow: false, stdout: true, stderr: true, tail: "50".to_string(), ..Default::default()
+        let options = Some(LogsOptions::<String> {
+            follow: false,
+            stdout: true,
+            stderr: true,
+            tail: "50".to_string(),
+            ..Default::default()
         });
-        
+
         let mut stream = self.client.logs(svc_id, options);
         let mut buffer = String::new();
-        
+
         while let Some(Ok(output)) = stream.next().await {
-             let bytes: Vec<u8> = match output {
+            let bytes: Vec<u8> = match output {
                 LogOutput::StdOut { message } => message.into(),
                 LogOutput::StdErr { message } => message.into(),
                 LogOutput::Console { message } => message.into(),
@@ -81,7 +98,10 @@ impl DockerAdapter {
 
     pub async fn get_container_stats(&self, svc_id: &str) -> Result<Stats> {
         debug!(event="FETCH_STATS", node.name=%self.node_name, container.id=%svc_id, "📊 Fetching stats for container: {}", svc_id);
-        let options = Some(StatsOptions { stream: false, one_shot: true });
+        let options = Some(StatsOptions {
+            stream: false,
+            one_shot: true,
+        });
         let mut stream = self.client.stats(svc_id, options);
         if let Some(result) = stream.next().await {
             return result.map_err(|e| anyhow::anyhow!("Stats error: {}", e));
@@ -89,25 +109,40 @@ impl DockerAdapter {
         Err(anyhow::anyhow!("No stats received"))
     }
 
-    pub async fn inspect_service(&self, svc_id: &str) -> Result<bollard::models::ContainerInspectResponse> {
+    pub async fn inspect_service(
+        &self,
+        svc_id: &str,
+    ) -> Result<bollard::models::ContainerInspectResponse> {
         debug!(event="INSPECT_CONTAINER", node.name=%self.node_name, container.id=%svc_id, "🔎 Inspecting container: {}", svc_id);
-        self.client.inspect_container(svc_id, None::<InspectContainerOptions>).await
+        self.client
+            .inspect_container(svc_id, None::<InspectContainerOptions>)
+            .await
             .map_err(|e| anyhow::anyhow!("Inspect error: {}", e))
     }
 
     // --- THE JANITOR ---
     pub async fn prune_system(&self) -> Result<String> {
         info!(event="SYSTEM_PRUNE_START", node.name=%self.node_name, "🧹 Starting system prune...");
-        let c_prune = self.client.prune_containers(None::<PruneContainersOptions<String>>).await?;
+        let c_prune = self
+            .client
+            .prune_containers(None::<PruneContainersOptions<String>>)
+            .await?;
         let c_deleted = c_prune.containers_deleted.unwrap_or_default().len();
 
-        let i_prune = self.client.prune_images(None::<PruneImagesOptions<String>>).await?;
+        let i_prune = self
+            .client
+            .prune_images(None::<PruneImagesOptions<String>>)
+            .await?;
         let i_deleted = i_prune.images_deleted.unwrap_or_default().len();
         let space = i_prune.space_reclaimed.unwrap_or(0);
 
-        let msg = format!("Deleted {} Containers, {} Images. Reclaimed {:.2} MB", 
-            c_deleted, i_deleted, (space as f64 / 1024.0 / 1024.0));
-            
+        let msg = format!(
+            "Deleted {} Containers, {} Images. Reclaimed {:.2} MB",
+            c_deleted,
+            i_deleted,
+            (space as f64 / 1024.0 / 1024.0)
+        );
+
         info!(
             event = "SYSTEM_PRUNE_DONE",
             node.name = %self.node_name,
@@ -122,30 +157,42 @@ impl DockerAdapter {
     // --- UPDATE ENGINE (V6.4 GRACEFUL DRAIN WITH TIMEOUT PROTECTION) ---
     pub async fn check_and_update_service(&self, svc_name: &str) -> Result<bool> {
         let docker = &self.client;
-        let inspect = docker.inspect_container(svc_name, None::<InspectContainerOptions>).await
+        let inspect = docker
+            .inspect_container(svc_name, None::<InspectContainerOptions>)
+            .await
             .map_err(|e| anyhow::anyhow!("Service not found: {}", e))?;
-        
+
         let current_image_id = inspect.image.clone().unwrap_or_default();
-        let image_name = inspect.config.as_ref().and_then(|c| c.image.clone())
+        let image_name = inspect
+            .config
+            .as_ref()
+            .and_then(|c| c.image.clone())
             .ok_or_else(|| anyhow::anyhow!("No image defined"))?;
 
         // --- SELF-UPDATE PROTECTION ---
-        let is_self = svc_name.contains("orchestrator"); 
-        
+        let is_self = svc_name.contains("orchestrator");
+
         debug!(
-            event="CHECK_UPDATES", 
-            node.name=%self.node_name, 
-            service=%svc_name, 
-            image=%image_name, 
+            event="CHECK_UPDATES",
+            node.name=%self.node_name,
+            service=%svc_name,
+            image=%image_name,
             "🔍 [{}] Checking updates for image: {}", svc_name, image_name
         );
 
         // 1. PULL (Yeni imajı çek)
-        let mut stream = docker.create_image(Some(CreateImageOptions { from_image: image_name.clone(), ..Default::default() }), None, None);
+        let mut stream = docker.create_image(
+            Some(CreateImageOptions {
+                from_image: image_name.clone(),
+                ..Default::default()
+            }),
+            None,
+            None,
+        );
         while let Some(res) = stream.next().await {
-            if let Err(e) = res { 
+            if let Err(e) = res {
                 error!(event="IMAGE_PULL_FAIL", error=%e, "❌ Pull Error: {}", e);
-                return Err(anyhow::anyhow!("Registry error")); 
+                return Err(anyhow::anyhow!("Registry error"));
             }
         }
 
@@ -153,15 +200,18 @@ impl DockerAdapter {
         let new_image_inspect = docker.inspect_image(&image_name).await?;
         let new_image_id = new_image_inspect.id.clone().unwrap_or_default();
 
-        if current_image_id == new_image_id { 
-            return Ok(false); 
+        if current_image_id == new_image_id {
+            return Ok(false);
         }
 
         info!(event="AUTO_PILOT_UPDATE_FOUND", service=%svc_name, "🚀 UPDATE FOUND for service: [{}]", svc_name);
 
         if is_self {
-            warn!(event="SELF_UPDATE_PREVENTED", "⚠️ Orchestrator cannot restart itself.");
-            return Ok(true); 
+            warn!(
+                event = "SELF_UPDATE_PREVENTED",
+                "⚠️ Orchestrator cannot restart itself."
+            );
+            return Ok(true);
         }
 
         let config = Config {
@@ -170,7 +220,9 @@ impl DockerAdapter {
             labels: inspect.config.as_ref().and_then(|c| c.labels.clone()),
             host_config: inspect.host_config.clone(),
             networking_config: inspect.network_settings.as_ref().and_then(|n| {
-                Some(bollard::container::NetworkingConfig { endpoints_config: n.networks.clone().unwrap_or_default() })
+                Some(bollard::container::NetworkingConfig {
+                    endpoints_config: n.networks.clone().unwrap_or_default(),
+                })
             }),
             ..Default::default()
         };
@@ -178,32 +230,55 @@ impl DockerAdapter {
         // 3. ZERO-DOWNTIME GRACEFUL SHUTDOWN (Dökülme/Drain)
         // [MİMARİ KORUMA]: Timeout süresi 1 Saatten -> 60 Saniyeye indirildi!
         info!(event="CONTAINER_DRAINING", service=%svc_name, "🛑 Sending SIGTERM for graceful drain (Timeout: 60 Seconds): [{}]", svc_name);
-        
+
         // [MİMARİ KORUMA]: tokio::spawn KALDIRILDI! İşlemler sırayla (Linear) yapılacak.
         let stop_opts = Some(StopContainerOptions { t: 60 });
         match docker.stop_container(svc_name, stop_opts).await {
-            Ok(_) => info!(event="CONTAINER_STOPPED", service=%svc_name, "🛑 Container stopped successfully."),
-            Err(e) => warn!(event="CONTAINER_STOP_ERROR", service=%svc_name, error=%e, "⚠️ Error while stopping container (might already be stopped): {}", e),
+            Ok(_) => {
+                info!(event="CONTAINER_STOPPED", service=%svc_name, "🛑 Container stopped successfully.")
+            }
+            Err(e) => {
+                warn!(event="CONTAINER_STOP_ERROR", service=%svc_name, error=%e, "⚠️ Error while stopping container (might already be stopped): {}", e)
+            }
         }
 
-        let remove_opts = Some(RemoveContainerOptions { force: true, ..Default::default() });
+        let remove_opts = Some(RemoveContainerOptions {
+            force: true,
+            ..Default::default()
+        });
         match docker.remove_container(svc_name, remove_opts).await {
-            Ok(_) => info!(event="CONTAINER_REMOVED", service=%svc_name, "💀 Old container removed."),
-            Err(e) => warn!(event="CONTAINER_REMOVE_ERROR", service=%svc_name, error=%e, "⚠️ Error while removing container: {}", e),
+            Ok(_) => {
+                info!(event="CONTAINER_REMOVED", service=%svc_name, "💀 Old container removed.")
+            }
+            Err(e) => {
+                warn!(event="CONTAINER_REMOVE_ERROR", service=%svc_name, error=%e, "⚠️ Error while removing container: {}", e)
+            }
         }
-        
+
         info!(event="CONTAINER_RECREATING", service=%svc_name, "✨ Creating updated container: [{}]", svc_name);
-        
-        if let Err(e) = docker.create_container(Some(CreateContainerOptions { name: svc_name.to_string(), platform: None }), config).await {
+
+        if let Err(e) = docker
+            .create_container(
+                Some(CreateContainerOptions {
+                    name: svc_name.to_string(),
+                    platform: None,
+                }),
+                config,
+            )
+            .await
+        {
             error!(event="CONTAINER_CREATE_ERROR", service=%svc_name, error=%e, "❌ Failed to create container: {}", e);
             return Err(anyhow::anyhow!("Container create failed"));
         }
 
-        if let Err(e) = docker.start_container(svc_name, None::<StartContainerOptions<String>>).await {
+        if let Err(e) = docker
+            .start_container(svc_name, None::<StartContainerOptions<String>>)
+            .await
+        {
             error!(event="CONTAINER_START_ERROR", service=%svc_name, error=%e, "❌ Failed to start container: {}", e);
             return Err(anyhow::anyhow!("Container start failed"));
         }
-        
+
         info!(event="AUTO_PILOT_SUCCESS", service=%svc_name, "✅ [{}] updated and started successfully.", svc_name);
 
         Ok(true)
@@ -212,7 +287,11 @@ impl DockerAdapter {
     pub async fn force_update_service(&self, svc_name: &str) -> Result<String> {
         info!(event="FORCE_UPDATE_TRIGGERED", node.name=%self.node_name, service=%svc_name, "⚡ Force update triggered for: [{}]", svc_name);
         match self.check_and_update_service(svc_name).await {
-            Ok(updated) => Ok(if updated { "Updated.".into() } else { "Already up to date, restarted.".into() }),
+            Ok(updated) => Ok(if updated {
+                "Updated.".into()
+            } else {
+                "Already up to date, restarted.".into()
+            }),
             Err(e) => {
                 error!(event="FORCE_UPDATE_FAIL", node.name=%self.node_name, service=%svc_name, error=%e, "❌ Force update failed for [{}]", svc_name);
                 Err(e)

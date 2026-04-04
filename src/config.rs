@@ -18,12 +18,14 @@ pub struct AppConfig {
 impl AppConfig {
     pub fn load() -> Self {
         let ap_raw = env::var("AUTO_PILOT_SERVICES").unwrap_or_default();
-        let ap_list = ap_raw.split(',')
+        let ap_list = ap_raw
+            .split(',')
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
-            
-        let upstream = env::var("UPSTREAM_ORCHESTRATOR_URL").ok()
+
+        let upstream = env::var("UPSTREAM_ORCHESTRATOR_URL")
+            .ok()
             .filter(|s| !s.trim().is_empty());
 
         // [ARCH-COMPLIANCE] Tenant izolasyon kuralı: Boş olması YASAKTIR.
@@ -34,17 +36,33 @@ impl AppConfig {
 
         Self {
             env: env::var("ENV").unwrap_or_else(|_| "production".into()),
-            node_name: env::var("NODE_NAME").unwrap_or_else(|_| 
-                hostname::get().map(|h| h.to_string_lossy().into_owned()).unwrap_or("NEXUS-NODE".into())
-            ).to_uppercase(),
+            node_name: env::var("NODE_NAME")
+                .unwrap_or_else(|_| {
+                    hostname::get()
+                        .map(|h| h.to_string_lossy().into_owned())
+                        .unwrap_or("NEXUS-NODE".into())
+                })
+                .to_uppercase(),
             host: env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string()),
-            http_port: env::var("HTTP_PORT").unwrap_or("11080".to_string()).parse().unwrap_or(11080),
-            _grpc_port: env::var("GRPC_PORT").unwrap_or("11081".to_string()).parse().unwrap_or(11081),
-            docker_socket: env::var("DOCKER_SOCKET").unwrap_or_else(|_| 
-                if cfg!(target_os = "windows") { "//./pipe/docker_engine".into() } 
-                else { "/var/run/docker.sock".into() }
-            ),
-            poll_interval: env::var("POLL_INTERVAL").unwrap_or("5".to_string()).parse().unwrap_or(5),
+            http_port: env::var("HTTP_PORT")
+                .unwrap_or("11080".to_string())
+                .parse()
+                .unwrap_or(11080),
+            _grpc_port: env::var("GRPC_PORT")
+                .unwrap_or("11081".to_string())
+                .parse()
+                .unwrap_or(11081),
+            docker_socket: env::var("DOCKER_SOCKET").unwrap_or_else(|_| {
+                if cfg!(target_os = "windows") {
+                    "//./pipe/docker_engine".into()
+                } else {
+                    "/var/run/docker.sock".into()
+                }
+            }),
+            poll_interval: env::var("POLL_INTERVAL")
+                .unwrap_or("5".to_string())
+                .parse()
+                .unwrap_or(5),
             auto_pilot_services: ap_list,
             upstream_url: upstream,
             tenant_id,
