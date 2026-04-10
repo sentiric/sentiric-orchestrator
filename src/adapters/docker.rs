@@ -32,7 +32,9 @@ impl DockerAdapter {
 
     // --- LIFECYCLE ---
     pub async fn start_service(&self, svc_id: &str) -> Result<()> {
+        // [ARCH-COMPLIANCE] Servis Başlatma kritik bir hikaye anıdır, INFO kalmalı.
         info!(event="CONTAINER_START", node.name=%self.node_name, container.id=%svc_id, "▶️ Starting container: {}", svc_id);
+
         self.client
             .start_container(svc_id, None::<StartContainerOptions<String>>)
             .await?;
@@ -97,7 +99,9 @@ impl DockerAdapter {
     }
 
     pub async fn get_container_stats(&self, svc_id: &str) -> Result<Stats> {
+        // [ARCH-COMPLIANCE] SUTS v4.2: Saniyelik metrik toplama DEBUG olmalıdır.
         debug!(event="FETCH_STATS", node.name=%self.node_name, container.id=%svc_id, "📊 Fetching stats for container: {}", svc_id);
+
         let options = Some(StatsOptions {
             stream: false,
             one_shot: true,
@@ -156,6 +160,14 @@ impl DockerAdapter {
 
     // --- UPDATE ENGINE (V6.4 GRACEFUL DRAIN WITH TIMEOUT PROTECTION) ---
     pub async fn check_and_update_service(&self, svc_name: &str) -> Result<bool> {
+        // [ARCH-COMPLIANCE] Güncelleme kontrolü (Polling) sessiz olmalı.
+        debug!(
+            event="CHECK_UPDATES",
+            node.name=%self.node_name,
+            service=%svc_name,
+            "🔍 Checking updates for service: {}", svc_name
+        );
+
         let docker = &self.client;
         let inspect = docker
             .inspect_container(svc_name, None::<InspectContainerOptions>)
@@ -171,14 +183,6 @@ impl DockerAdapter {
 
         // --- SELF-UPDATE PROTECTION ---
         let is_self = svc_name.contains("orchestrator");
-
-        debug!(
-            event="CHECK_UPDATES",
-            node.name=%self.node_name,
-            service=%svc_name,
-            image=%image_name,
-            "🔍 [{}] Checking updates for image: {}", svc_name, image_name
-        );
 
         // 1. PULL (Yeni imajı çek)
         let mut stream = docker.create_image(

@@ -10,7 +10,6 @@ use axum::{
     Json, Router,
 };
 use futures_util::StreamExt;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
@@ -21,7 +20,7 @@ use crate::core::domain::{
     TopologyNode,
 };
 use crate::AppState;
-use serde_json::{json, Value};
+use serde_json::json;
 
 const UI_ASSETS_PATH: &str = "src/ui";
 

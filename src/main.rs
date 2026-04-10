@@ -183,7 +183,7 @@ async fn main() -> anyhow::Result<()> {
 
                         let mut cpu_percent = 0.0;
                         let mut mem_usage_mb = 0;
-                        let mut gpu_mem_usage_mb = 0;
+                        let gpu_mem_usage_mb = 0;
 
                         if is_up && fetch_heavy_metrics {
                             if let Ok(stats) =
