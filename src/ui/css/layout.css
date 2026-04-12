@@ -170,3 +170,19 @@
 .term-sev-error { color: #f85149; font-weight: bold; margin-right: 8px; }
 .term-event { color: #c084fc; margin-right: 8px; font-weight: bold;}
 .term-msg { color: #ccc; }
+
+/* src/ui/css/layout.css İÇİNE EN ALTA EKLENECEK */
+
+.update-overlay {
+    position: absolute; inset: 0; background: rgba(0,0,0,0.85); backdrop-filter: blur(3px);
+    display: flex; flex-direction: column; justify-content: center; align-items: center;
+    z-index: 20; border-radius: 8px; text-align: center; padding: 20px;
+}
+.update-spinner { width: 60%; height: 4px; background: #222; border-radius: 2px; overflow: hidden; margin-bottom: 12px; }
+.update-spinner-bar { width: 50%; height: 100%; background: var(--accent-orange); animation: slide 1s infinite alternate; }
+.update-text { font-family: var(--font-mono); font-size: 11px; color: var(--accent-orange); font-weight: bold; line-height: 1.4; word-break: break-all;}
+
+.val.net { color: #f472b6; }
+.val.disk { color: #fde047; }
+
+@keyframes slide { from { transform: translateX(0); } to { transform: translateX(100%); } }

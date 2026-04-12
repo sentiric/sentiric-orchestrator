@@ -30,7 +30,6 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .nest_service("/ui", ServeDir::new(UI_ASSETS_PATH))
         .route("/ws", get(ws_handler))
         .route("/ws/logs/:id", get(ws_logs_handler))
-        // [KRİTİK DÜZELTME]: 404 Hatasını çözen rota eklendi!
         .route("/api/config", get(get_system_config))
         .route("/api/status", get(status_handler))
         .route("/api/topology", get(topology_handler))
@@ -349,12 +348,12 @@ async fn export_llm_handler(State(state): State<Arc<AppState>>) -> String {
             let img_hash = svc
                 .image
                 .split('@')
-                .last()
+                .next_back()
                 .unwrap_or(&svc.image)
                 .to_string();
             service_versions
                 .entry(svc.name.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push((node.clone(), img_hash));
         }
     }
@@ -392,13 +391,12 @@ async fn export_llm_handler(State(state): State<Arc<AppState>>) -> String {
                 status_icon, svc.name, svc.cpu_usage, svc.mem_usage, svc.auto_pilot
             ));
         }
-        report.push_str("\n");
+        report.push('\n');
     }
     report
 }
 
 async fn inspect_handler(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
-    // [KRİTİK DÜZELTME]: null id gelirse çökme!
     if id.is_empty() || id == "null" {
         return (StatusCode::BAD_REQUEST, "Invalid ID").into_response();
     }
@@ -480,11 +478,25 @@ async fn toggle_handler(
     Json(p): Json<ToggleParams>,
 ) -> Json<bool> {
     info!(event="AUTOPILOT_TOGGLED", service=%p.service, enabled=%p.enabled, "Auto-pilot toggle");
+
     state
         .auto_pilot_config
         .lock()
         .await
-        .insert(p.service, p.enabled);
+        .insert(p.service.clone(), p.enabled);
+
+    {
+        let mut cache = state.services_cache.lock().await;
+        if let Some(svc) = cache.get_mut(&p.service) {
+            svc.auto_pilot = p.enabled;
+        }
+    }
+
+    let cluster_map = state.cluster_cache.lock().await.clone();
+    let _ = state
+        .tx
+        .send(serde_json::json!({ "type": "cluster_update", "data": cluster_map }).to_string());
+
     Json(p.enabled)
 }
 

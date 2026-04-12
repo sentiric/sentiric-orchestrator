@@ -34,6 +34,13 @@ export const Store = {
                 }
                 this.notify();
                 break;
+            case 'UPDATE_PROGRESS': // [YENİ]
+                if (this.state.cluster[this.state.localNodeName]) {
+                    const svcInfo = this.state.cluster[this.state.localNodeName].services.find(s => s.name === payload.service);
+                    if (svcInfo) svcInfo.update_progress = payload.progress;
+                }
+                this.notify();
+                break;
         }
     },
 

@@ -9,21 +9,32 @@ use bollard::image::{CreateImageOptions, PruneImagesOptions};
 use bollard::Docker;
 use futures_util::{Stream, StreamExt};
 use std::default::Default;
+use std::sync::Arc;
+use tokio::sync::broadcast;
 use tracing::{debug, error, info, warn};
 
 #[derive(Clone)]
 pub struct DockerAdapter {
     client: Docker,
-    node_name: String, // Artık loglarda aktif olarak kullanılıyor
+    node_name: String,
+    tx: Arc<broadcast::Sender<String>>,
 }
 
 impl DockerAdapter {
-    pub fn new(socket: &str, node_name: String) -> Result<Self> {
+    pub fn new(
+        socket: &str,
+        node_name: String,
+        tx: Arc<broadcast::Sender<String>>,
+    ) -> Result<Self> {
         let client = Docker::connect_with_unix(socket, 120, bollard::API_DEFAULT_VERSION)
             .or_else(|_| Docker::connect_with_local_defaults())
             .map_err(|e| anyhow::anyhow!("Docker Bağlantı Hatası: {}", e))?;
 
-        Ok(Self { client, node_name })
+        Ok(Self {
+            client,
+            node_name,
+            tx,
+        })
     }
 
     pub fn get_client(&self) -> Docker {
@@ -32,9 +43,7 @@ impl DockerAdapter {
 
     // --- LIFECYCLE ---
     pub async fn start_service(&self, svc_id: &str) -> Result<()> {
-        // [ARCH-COMPLIANCE] Servis Başlatma kritik bir hikaye anıdır, INFO kalmalı.
         info!(event="CONTAINER_START", node.name=%self.node_name, container.id=%svc_id, "▶️ Starting container: {}", svc_id);
-
         self.client
             .start_container(svc_id, None::<StartContainerOptions<String>>)
             .await?;
@@ -99,7 +108,6 @@ impl DockerAdapter {
     }
 
     pub async fn get_container_stats(&self, svc_id: &str) -> Result<Stats> {
-        // [ARCH-COMPLIANCE] SUTS v4.2: Saniyelik metrik toplama DEBUG olmalıdır.
         debug!(event="FETCH_STATS", node.name=%self.node_name, container.id=%svc_id, "📊 Fetching stats for container: {}", svc_id);
 
         let options = Some(StatsOptions {
@@ -158,9 +166,8 @@ impl DockerAdapter {
         Ok(msg)
     }
 
-    // --- UPDATE ENGINE (V6.4 GRACEFUL DRAIN WITH TIMEOUT PROTECTION) ---
+    // --- UPDATE ENGINE ---
     pub async fn check_and_update_service(&self, svc_name: &str) -> Result<bool> {
-        // [ARCH-COMPLIANCE] Güncelleme kontrolü (Polling) sessiz olmalı.
         debug!(
             event="CHECK_UPDATES",
             node.name=%self.node_name,
@@ -181,10 +188,9 @@ impl DockerAdapter {
             .and_then(|c| c.image.clone())
             .ok_or_else(|| anyhow::anyhow!("No image defined"))?;
 
-        // --- SELF-UPDATE PROTECTION ---
         let is_self = svc_name.contains("orchestrator");
 
-        // 1. PULL (Yeni imajı çek)
+        // 1. PULL (Yeni imajı çek ve Progress bildir)
         let mut stream = docker.create_image(
             Some(CreateImageOptions {
                 from_image: image_name.clone(),
@@ -193,10 +199,45 @@ impl DockerAdapter {
             None,
             None,
         );
+
         while let Some(res) = stream.next().await {
-            if let Err(e) = res {
-                error!(event="IMAGE_PULL_FAIL", error=%e, "❌ Pull Error: {}", e);
-                return Err(anyhow::anyhow!("Registry error"));
+            match res {
+                Ok(info) => {
+                    let status = info.status.unwrap_or_default();
+                    let progress = if let Some(det) = info.progress_detail {
+                        if let (Some(curr), Some(tot)) = (det.current, det.total) {
+                            if tot > 0 {
+                                format!(
+                                    "{} ({}%)",
+                                    status,
+                                    (curr as f64 / tot as f64 * 100.0) as u32
+                                )
+                            } else {
+                                status.clone()
+                            }
+                        } else {
+                            status.clone()
+                        }
+                    } else {
+                        status.clone()
+                    }
+                    .replace("\n", ""); // Konsoldan gelen gereksiz kaçış karakterlerini temizle
+
+                    let _ = self.tx.send(
+                        serde_json::json!({
+                            "type": "update_progress",
+                            "data": { "service": svc_name, "progress": progress }
+                        })
+                        .to_string(),
+                    );
+                }
+                Err(e) => {
+                    error!(event="IMAGE_PULL_FAIL", error=%e, "❌ Pull Error: {}", e);
+                    let _ = self.tx.send(
+                        serde_json::json!({ "type": "update_progress", "data": { "service": svc_name, "progress": null } }).to_string(),
+                    );
+                    return Err(anyhow::anyhow!("Registry error"));
+                }
             }
         }
 
@@ -205,6 +246,9 @@ impl DockerAdapter {
         let new_image_id = new_image_inspect.id.clone().unwrap_or_default();
 
         if current_image_id == new_image_id {
+            let _ = self.tx.send(
+                serde_json::json!({ "type": "update_progress", "data": { "service": svc_name, "progress": null } }).to_string(),
+            );
             return Ok(false);
         }
 
@@ -215,6 +259,9 @@ impl DockerAdapter {
                 event = "SELF_UPDATE_PREVENTED",
                 "⚠️ Orchestrator cannot restart itself."
             );
+            let _ = self.tx.send(
+                serde_json::json!({ "type": "update_progress", "data": { "service": svc_name, "progress": null } }).to_string(),
+            );
             return Ok(true);
         }
 
@@ -223,26 +270,28 @@ impl DockerAdapter {
             env: inspect.config.as_ref().and_then(|c| c.env.clone()),
             labels: inspect.config.as_ref().and_then(|c| c.labels.clone()),
             host_config: inspect.host_config.clone(),
-            networking_config: inspect.network_settings.as_ref().and_then(|n| {
-                Some(bollard::container::NetworkingConfig {
+            networking_config: inspect.network_settings.as_ref().map(|n| {
+                bollard::container::NetworkingConfig {
                     endpoints_config: n.networks.clone().unwrap_or_default(),
-                })
+                }
             }),
             ..Default::default()
         };
 
         // 3. ZERO-DOWNTIME GRACEFUL SHUTDOWN (Dökülme/Drain)
-        // [MİMARİ KORUMA]: Timeout süresi 1 Saatten -> 60 Saniyeye indirildi!
-        info!(event="CONTAINER_DRAINING", service=%svc_name, "🛑 Sending SIGTERM for graceful drain (Timeout: 60 Seconds): [{}]", svc_name);
+        info!(event="CONTAINER_DRAINING", service=%svc_name, "🛑 Sending SIGTERM for graceful drain: [{}]", svc_name);
 
-        // [MİMARİ KORUMA]: tokio::spawn KALDIRILDI! İşlemler sırayla (Linear) yapılacak.
+        let _ = self.tx.send(
+            serde_json::json!({ "type": "update_progress", "data": { "service": svc_name, "progress": "DRAINING (60s)" } }).to_string(),
+        );
+
         let stop_opts = Some(StopContainerOptions { t: 60 });
         match docker.stop_container(svc_name, stop_opts).await {
             Ok(_) => {
                 info!(event="CONTAINER_STOPPED", service=%svc_name, "🛑 Container stopped successfully.")
             }
             Err(e) => {
-                warn!(event="CONTAINER_STOP_ERROR", service=%svc_name, error=%e, "⚠️ Error while stopping container (might already be stopped): {}", e)
+                warn!(event="CONTAINER_STOP_ERROR", service=%svc_name, error=%e, "⚠️ Error while stopping container: {}", e)
             }
         }
 
@@ -260,6 +309,9 @@ impl DockerAdapter {
         }
 
         info!(event="CONTAINER_RECREATING", service=%svc_name, "✨ Creating updated container: [{}]", svc_name);
+        let _ = self.tx.send(
+            serde_json::json!({ "type": "update_progress", "data": { "service": svc_name, "progress": "STARTING..." } }).to_string(),
+        );
 
         if let Err(e) = docker
             .create_container(
@@ -272,6 +324,9 @@ impl DockerAdapter {
             .await
         {
             error!(event="CONTAINER_CREATE_ERROR", service=%svc_name, error=%e, "❌ Failed to create container: {}", e);
+            let _ = self.tx.send(
+                serde_json::json!({ "type": "update_progress", "data": { "service": svc_name, "progress": null } }).to_string(),
+            );
             return Err(anyhow::anyhow!("Container create failed"));
         }
 
@@ -280,10 +335,17 @@ impl DockerAdapter {
             .await
         {
             error!(event="CONTAINER_START_ERROR", service=%svc_name, error=%e, "❌ Failed to start container: {}", e);
+            let _ = self.tx.send(
+                serde_json::json!({ "type": "update_progress", "data": { "service": svc_name, "progress": null } }).to_string(),
+            );
             return Err(anyhow::anyhow!("Container start failed"));
         }
 
         info!(event="AUTO_PILOT_SUCCESS", service=%svc_name, "✅ [{}] updated and started successfully.", svc_name);
+
+        let _ = self.tx.send(
+            serde_json::json!({ "type": "update_progress", "data": { "service": svc_name, "progress": null } }).to_string(),
+        );
 
         Ok(true)
     }

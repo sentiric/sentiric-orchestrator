@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 pub enum HealthStatus {
     Online,
     Draining,
-    Warning, // [YENİ]: Kırmızı Quarantined yerine Turuncu İkaz
+    Warning,
     RiskOom,
     Offline,
 }
@@ -20,8 +20,18 @@ pub struct ServiceInstance {
     pub node: String,
     pub cpu_usage: f64,
     pub mem_usage: u64,
-    pub gpu_mem_usage: u64, // [YENİ]: Konteyner bazlı GPU RAM (MB)
+    pub gpu_mem_usage: u64,
     pub has_gpu: bool,
+
+    // [YENİ] Network ve Disk Metrikleri (MB/s)
+    pub net_rx_mbs: f64,
+    pub net_tx_mbs: f64,
+    pub disk_read_mbs: f64,
+    pub disk_write_mbs: f64,
+
+    // [YENİ] Canlı Güncelleme Durumu
+    #[serde(default)]
+    pub update_progress: Option<String>,
 
     pub health: HealthStatus,
     pub violations: Vec<String>,
@@ -36,6 +46,11 @@ pub struct NodeStats {
     pub gpu_usage: f32,
     pub gpu_mem_used: u64,
     pub gpu_mem_total: u64,
+
+    // [YENİ] Sunucu Geneli Network (MB/s)
+    pub net_rx_mbs: f64,
+    pub net_tx_mbs: f64,
+
     pub last_seen: String, // ISO8601
     pub status: String,
 }

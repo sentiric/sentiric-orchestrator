@@ -1,7 +1,9 @@
-// src/ui/js/app.js
+// src/ui/js/app.js - YENİLENMİŞ DOSYA
 import { WebSocketStream } from './websocket.js';
 import { TopologyMap } from './components/topology.js';
 import { Store } from './store.js';
+
+let isAppPaused = false; // Visibility API Kontrolü
 
 const ui = {
     grid: document.getElementById('services-grid'),
@@ -16,7 +18,6 @@ const ui = {
     init() {
         console.log("💠 Sovereign Orchestrator UI Initializing...");
         
-        // 404 Veriyordu, artık güvenle Config okuyacak. Hata alsa bile arayüz çökmeyecek.
         fetch('/api/config')
             .then(r => {
                 if(!r.ok) throw new Error("Config not found");
@@ -39,6 +40,7 @@ const ui = {
         this.bindEvents();
         
         Store.subscribe((state) => {
+            if(isAppPaused) return; // [PERFORMANS KORUMASI]
             requestAnimationFrame(() => {
                 this.renderSidebar(state);
                 this.updateSelectedNodeDOM(state); 
@@ -50,16 +52,12 @@ const ui = {
         });
     },
 
-    // KORUMA: Eğer element DOM'da yoksa çökmek yerine sessizce atlar
     safeClick(id, handler) {
         const el = document.getElementById(id);
         if (el) {
-            // Mevcut event listenerları temizlemek için (Eğer iki kez çağrılırsa diye)
             const newEl = el.cloneNode(true);
             el.parentNode.replaceChild(newEl, el);
             newEl.addEventListener('click', handler);
-        } else {
-            console.warn(`[UI Warning] Button '#${id}' not found in DOM.`);
         }
     },
 
@@ -134,29 +132,17 @@ const ui = {
             } catch(e) {}
         });
 
-        this.safeClick('btn-self-update', async () => {
-            if(confirm('⚠️ WARNING: Orchestrator will restart itself. UI will disconnect momentarily. Proceed?')) {
-                alert("Self-update sequence initiated. Please wait 10 seconds and refresh.");
-            }
-        });
-
-        // Event Delegation for dynamic grid elements
         const gridEl = document.getElementById('services-grid');
         if (gridEl) {
             gridEl.addEventListener('click', (e) => {
                 const btnInfo = e.target.closest('.btn-info');
-                if (btnInfo) { 
-                    this.openModal(btnInfo.dataset.id, btnInfo.dataset.name); 
-                    return; 
-                }
+                if (btnInfo) { this.openModal(btnInfo.dataset.id, btnInfo.dataset.name); return; }
                 
                 const btnViolations = e.target.closest('.badge-warning');
                 if (btnViolations) {
-                    const nodeName = Store.state.selectedNode;
-                    const svcName = btnViolations.dataset.name;
-                    const nodeData = Store.state.cluster[nodeName];
+                    const nodeData = Store.state.cluster[Store.state.selectedNode];
                     if (nodeData) {
-                        const svc = nodeData.services.find(s => s.name === svcName);
+                        const svc = nodeData.services.find(s => s.name === btnViolations.dataset.name);
                         if (svc) this.openViolationsModal(svc);
                     }
                     return;
@@ -165,9 +151,8 @@ const ui = {
                 const btnAction = e.target.closest('.btn-api-action');
                 if (btnAction) {
                     const action = btnAction.dataset.action;
-                    const sname = btnAction.dataset.name; // ID yerine Name kullanıyoruz!
-                    
-                    if (!sname || sname === 'null' || sname === 'undefined') return;
+                    const sname = btnAction.dataset.name; 
+                    if (!sname || sname === 'null') return;
 
                     if (action === 'start') {
                         fetch(`/api/service/${sname}/start`, {method:'POST'}).catch(console.error);
@@ -181,7 +166,6 @@ const ui = {
                         fetch(`/api/service/${sname}/restart`, {method:'POST'}).catch(console.error);
                         btnAction.innerHTML = "⏳";
                     } else if (action === 'force_pull') {
-
                         if(confirm(`Force Pull Latest Image & Recreate ${sname}?`)) {
                             fetch(`/api/update?service=${sname}`, {method:'POST'}).catch(console.error);
                             btnAction.innerHTML = "⏳";
@@ -248,12 +232,6 @@ const ui = {
         if(elHostRamVal) elHostRamVal.innerText = `${(h.ram_used/1024).toFixed(1)} GB`;
         if(elHostRamBar) elHostRamBar.style.width = `${Math.min(ramPct, 100)}%`;
 
-        const gpuPct = h.gpu_mem_total > 0 ? (h.gpu_mem_used / h.gpu_mem_total) * 100 : 0;
-        const elHostGpuVal = document.getElementById('host-gpu-val');
-        const elHostGpuBar = document.getElementById('host-gpu-bar');
-        if(elHostGpuVal) elHostGpuVal.innerText = `${(h.gpu_mem_used/1024).toFixed(1)} GB`;
-        if(elHostGpuBar) elHostGpuBar.style.width = `${Math.min(gpuPct, 100)}%`;
-
         const loader = document.getElementById('grid-loader');
         if (loader) loader.style.display = 'none';
 
@@ -282,7 +260,9 @@ const ui = {
                         titleGroup: cardEl.querySelector('.svc-title'),
                         cpuText: cardEl.querySelector('.val.cpu'),
                         ramText: cardEl.querySelector('.val.ram'),
-                        gpuText: cardEl.querySelector('.val.gpu'),
+                        netText: cardEl.querySelector('.val.net'),
+                        diskText: cardEl.querySelector('.val.disk'),
+                        overlayContainer: cardEl.querySelector('.overlay-container'),
                         btnStart: cardEl.querySelector('.btn-api-action[data-action="start"]'),
                         btnStop: cardEl.querySelector('.btn-api-action[data-action="stop"]'),
                         btnRestart: cardEl.querySelector('.btn-api-action[data-action="restart"]'),
@@ -298,6 +278,7 @@ const ui = {
 
     getCardHTML(svc) {
         return `
+            <div class="overlay-container"></div>
             <div class="svc-header">
                 <div><div class="svc-title"></div><span class="svc-image">${svc.image.split('@')[0]}</span></div>
                 <div class="svc-status" style="color:var(--text-main);"></div>
@@ -311,9 +292,9 @@ const ui = {
                     <div class="m-labels"><span class="lbl">RAM</span><span class="val ram">0 MB</span></div>
                     <div class="sparkline-box"><canvas id="cvs-ram-${svc.short_id}" class="sparkline-canvas" width="400" height="24"></canvas></div>
                 </div>
-                <div class="metric-row" id="gpu-row-${svc.short_id}" style="display:none;">
-                    <div class="m-labels"><span class="lbl">GPU VRAM</span><span class="val gpu" style="color:#c084fc;">0 MB</span></div>
-                    <div class="sparkline-box"><canvas id="cvs-gpu-${svc.short_id}" class="sparkline-canvas" width="400" height="24"></canvas></div>
+                <div class="metric-row" style="flex-direction:row; gap:10px;">
+                    <div style="flex:1;"><div class="m-labels"><span class="lbl">NET I/O</span><span class="val net">0 MB/s</span></div></div>
+                    <div style="flex:1;"><div class="m-labels"><span class="lbl">DSK I/O</span><span class="val disk">0 MB/s</span></div></div>
                 </div>
             </div>
             <div class="svc-actions">
@@ -336,7 +317,7 @@ const ui = {
             statusClass = 'status-warning'; statusText = 'WARNING';
             badgesHtml += `<span class="badge badge-warning" data-name="${svc.name}">⚠️ ${svc.violations?.length || 1} ALERTS</span>`;
         } else if (svc.health === 'Draining') {
-            statusClass = 'status-draining'; statusText = 'DRAINING (UPDATING)';
+            statusClass = 'status-draining'; statusText = 'DRAINING';
             badgesHtml += `<span class="badge badge-draining">⏳ SHUTDOWN</span>`;
         } else if (svc.health === 'RiskOom') {
             statusClass = 'status-riskoom'; statusText = 'RUNNING (RISK)';
@@ -344,11 +325,7 @@ const ui = {
         } else if (svc.health === 'Online') {
             statusClass = 'status-online'; statusText = 'RUNNING';
         }
-        if (svc.has_gpu) {
-            badgesHtml += `<span class="badge badge-gpu">GPU</span>`;
-            const row = document.getElementById(`gpu-row-${svc.short_id}`);
-            if(row) row.style.display = 'flex';
-        }
+        if (svc.has_gpu) badgesHtml += `<span class="badge badge-gpu">GPU</span>`;
 
         if (cardData.element.className !== `service-card ${statusClass}`) cardData.element.className = `service-card ${statusClass}`;
         
@@ -356,11 +333,28 @@ const ui = {
         cardData.ui.titleGroup.innerHTML = `${svc.name} ${badgesHtml}`;
         cardData.ui.cpuText.innerText = `${svc.cpu_usage.toFixed(1)}%`;
         cardData.ui.ramText.innerText = `${svc.mem_usage} MB`;
-        if(cardData.ui.gpuText) cardData.ui.gpuText.innerText = `${svc.gpu_mem_usage} MB`;
+        
+        // Network/Disk Render
+        const totalNet = svc.net_rx_mbs + svc.net_tx_mbs;
+        const totalDisk = svc.disk_read_mbs + svc.disk_write_mbs;
+        cardData.ui.netText.innerText = `${totalNet.toFixed(2)} MB/s`;
+        cardData.ui.diskText.innerText = `${totalDisk.toFixed(2)} MB/s`;
+
+        // Update Overlay Progress
+        if (svc.update_progress || svc.health === 'Draining') {
+            cardData.ui.overlayContainer.innerHTML = `
+                <div class="update-overlay">
+                    <div class="update-spinner"><div class="update-spinner-bar"></div></div>
+                    <div class="update-text">${svc.update_progress || "INITIATING..."}</div>
+                </div>
+            `;
+        } else {
+            cardData.ui.overlayContainer.innerHTML = '';
+        }
 
         const isUp = svc.status.toLowerCase().includes('up');
         const isRemote = state.selectedNode !== state.localNodeName;
-        const btnDisabled = (svc.health === 'Draining' || !isUp);
+        const btnDisabled = (svc.health === 'Draining' || !isUp || svc.update_progress != null);
 
         if (isRemote) {
             cardData.ui.btnStart.style.display = 'none'; cardData.ui.btnStop.style.display = 'none';
@@ -398,7 +392,8 @@ const ui = {
     },
 
     openModal(id, name) {
-        if (!id || id === 'null' || id === 'undefined') return;
+        // Modal kodu aynı kalıyor... (Kısaltıldı)
+        if (!id || id === 'null') return;
         this.currentId = id;
         const modal = document.getElementById('info-modal');
         if(!modal) return;
@@ -407,20 +402,11 @@ const ui = {
         document.querySelectorAll('.modal-tabs .tab-btn').forEach(b => b.classList.remove('active'));
         document.querySelectorAll('.modal-view').forEach(v => v.classList.remove('active'));
         
-        const vioTab = document.getElementById('tab-violations');
-        if(vioTab) vioTab.style.display = 'none';
-
         const logsTabBtn = document.querySelector('.modal-tabs .tab-btn[data-target="view-logs"]');
         if(logsTabBtn) logsTabBtn.classList.add('active');
         
         const logsView = document.getElementById('view-logs');
         if(logsView) logsView.classList.add('active');
-
-        const logOutput = document.getElementById('log-output');
-        if (logOutput) logOutput.innerHTML = '';
-        const logStatus = document.getElementById('log-status');
-        if (logStatus) logStatus.style.display = 'block';
-        
         this.startLogStream(id);
     },
 
@@ -450,50 +436,33 @@ const ui = {
     },
 
     startLogStream(id) {
-        if (!id || id === 'null' || id === 'undefined') return;
+        if (!id || id === 'null') return;
         if (this.logSocket) this.logSocket.close();
         
         this.logSocket = new WebSocket(`ws://${window.location.host}/ws/logs/${id}`);
         this.logSocket.onmessage = (e) => {
             const logOutput = document.getElementById('log-output');
-            const logStatus = document.getElementById('log-status');
-            if (logStatus) logStatus.style.display = 'none';
             if (logOutput) {
                 try {
                     const data = JSON.parse(e.data);
-                    const ts = data.ts ? data.ts.substring(11, 19) : "00:00:00";
-                    const sev = data.severity || "INFO";
-                    let sevClass = "term-sev-info";
-                    if (sev === "ERROR" || sev === "FATAL") sevClass = "term-sev-error";
-                    else if (sev === "WARN") sevClass = "term-sev-warn";
-
-                    const evt = data.event || "LOG";
-                    const msg = data.message || JSON.stringify(data);
-                    
                     const div = document.createElement('div');
                     div.className = "term-row";
-                    div.innerHTML = `<span class="term-time">[${ts}]</span> <span class="${sevClass}">[${sev}]</span> <span class="term-event">${evt}</span> <span class="term-msg">${msg}</span>`;
-                    
+                    div.innerHTML = `<span class="term-time">[${data.ts ? data.ts.substring(11, 19) : ''}]</span> <span class="term-msg">${data.message || JSON.stringify(data)}</span>`;
                     logOutput.appendChild(div);
                     if(logOutput.childNodes.length > 500) logOutput.removeChild(logOutput.firstChild);
                 } catch(err) {
                     const div = document.createElement('div');
-                    div.className = "term-row";
-                    div.innerText = e.data;
+                    div.className = "term-row"; div.innerText = e.data;
                     logOutput.appendChild(div);
                 }
                 const logView = document.getElementById('view-logs');
                 if(logView) logView.scrollTop = logView.scrollHeight;
             }
         };
-        this.logSocket.onerror = () => {
-            const logStatus = document.getElementById('log-status');
-            if (logStatus) { logStatus.innerText = "Error: Stream interrupted."; logStatus.style.color = "var(--accent-red)"; }
-        };
     },
 
     async loadInspect(id) {
-        if (!id || id === 'null' || id === 'undefined') return;
+        if (!id || id === 'null') return;
         const inspOut = document.getElementById('inspect-output');
         if(!inspOut) return;
         inspOut.innerText = "Scanning Docker API...";
@@ -501,12 +470,7 @@ const ui = {
             const res = await fetch(`/api/service/${id}/inspect`);
             if(!res.ok) throw new Error("HTTP " + res.status);
             const data = await res.json();
-            const clean = {
-                Id: data.Id, Created: data.Created, State: data.State,
-                Config: { Image: data.Config.Image, Env: data.Config.Env },
-                Network: data.NetworkSettings.Networks
-            };
-            inspOut.innerText = JSON.stringify(clean, null, 2);
+            inspOut.innerText = JSON.stringify({ Id: data.Id, State: data.State, Config: data.Config }, null, 2);
         } catch(e) { inspOut.innerText = "Error: " + e.message; }
     },
 
@@ -530,7 +494,19 @@ const ui = {
 window.Store = Store; 
 window.ui = ui;
 
-// Window yüklendiğinde başlat (Flash ve Null hatalarını keser)
+// [PERFORMANS KORUMASI] - Visibility API
+document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+        console.log("💤 Uyku Modu (Tab gizli). CPU/RAM tasarrufu için render durduruldu.");
+        isAppPaused = true;
+    } else {
+        console.log("👁️ Uyanış. Render devam ediyor.");
+        isAppPaused = false;
+        // Tab uzun süre arkada kalırsa cache patlamasını önlemek için tam sayfa yenileme yap
+        location.reload();
+    }
+});
+
 window.addEventListener('load', () => {
     ui.init(); 
 
@@ -538,6 +514,8 @@ window.addEventListener('load', () => {
         ui.updateConnectionStatus(true);
         if (msg.type === 'cluster_update') {
             Store.dispatch('CLUSTER_UPDATE', msg.data);
+        } else if (msg.type === 'update_progress') {
+            Store.dispatch('UPDATE_PROGRESS', msg.data); // [YENİ] Backend'den gelen progress'i işle
         }
     }, (isOnline) => {
         ui.updateConnectionStatus(isOnline);

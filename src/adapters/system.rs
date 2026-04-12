@@ -1,23 +1,53 @@
+// src/adapters/system.rs
 use crate::core::domain::NodeStats;
 use std::process::Command;
-use sysinfo::System;
+use std::time::Instant;
+use sysinfo::{Networks, System};
 
 pub struct SystemMonitor {
     sys: System,
+    networks: Networks,
     node_name: String,
+    last_update: Instant,
+    last_net_rx: u64,
+    last_net_tx: u64,
 }
 
 impl SystemMonitor {
     pub fn new(node_name: String) -> Self {
         Self {
             sys: System::new_all(),
+            networks: Networks::new_with_refreshed_list(),
             node_name,
+            last_update: Instant::now(),
+            last_net_rx: 0,
+            last_net_tx: 0,
         }
     }
 
     pub fn snapshot(&mut self) -> NodeStats {
         self.sys.refresh_cpu_usage();
         self.sys.refresh_memory();
+        self.networks.refresh_list();
+
+        let elapsed = self.last_update.elapsed().as_secs_f64().max(0.1);
+        self.last_update = Instant::now();
+
+        let mut current_rx = 0;
+        let mut current_tx = 0;
+        for (_interface_name, data) in &self.networks {
+            current_rx += data.total_received();
+            current_tx += data.total_transmitted();
+        }
+
+        let rx_delta = current_rx.saturating_sub(self.last_net_rx);
+        let tx_delta = current_tx.saturating_sub(self.last_net_tx);
+
+        self.last_net_rx = current_rx;
+        self.last_net_tx = current_tx;
+
+        let net_rx_mbs = (rx_delta as f64 / elapsed) / 1_048_576.0;
+        let net_tx_mbs = (tx_delta as f64 / elapsed) / 1_048_576.0;
 
         let (gpu_util, gpu_mem_used, gpu_mem_total) = self.get_gpu_metrics();
 
@@ -29,6 +59,8 @@ impl SystemMonitor {
             gpu_usage: gpu_util,
             gpu_mem_used,
             gpu_mem_total,
+            net_rx_mbs,
+            net_tx_mbs,
             last_seen: chrono::Utc::now().to_rfc3339(),
             status: "ONLINE".to_string(),
         }
@@ -36,7 +68,7 @@ impl SystemMonitor {
 
     fn get_gpu_metrics(&self) -> (f32, u64, u64) {
         let output = Command::new("nvidia-smi")
-            .args(&[
+            .args([
                 "--query-gpu=utilization.gpu,memory.used,memory.total",
                 "--format=csv,noheader,nounits",
             ])
