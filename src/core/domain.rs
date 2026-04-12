@@ -23,13 +23,11 @@ pub struct ServiceInstance {
     pub gpu_mem_usage: u64,
     pub has_gpu: bool,
 
-    // [YENİ] Network ve Disk Metrikleri (MB/s)
     pub net_rx_mbs: f64,
     pub net_tx_mbs: f64,
     pub disk_read_mbs: f64,
     pub disk_write_mbs: f64,
 
-    // [YENİ] Canlı Güncelleme Durumu
     #[serde(default)]
     pub update_progress: Option<String>,
 
@@ -43,11 +41,15 @@ pub struct NodeStats {
     pub cpu_usage: f32,
     pub ram_used: u64,  // MB
     pub ram_total: u64, // MB
+
+    // [YENİ] Disk Kapasitesi
+    pub disk_used: u64,  // GB
+    pub disk_total: u64, // GB
+
     pub gpu_usage: f32,
     pub gpu_mem_used: u64,
     pub gpu_mem_total: u64,
 
-    // [YENİ] Sunucu Geneli Network (MB/s)
     pub net_rx_mbs: f64,
     pub net_tx_mbs: f64,
 

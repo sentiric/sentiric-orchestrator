@@ -44,11 +44,17 @@
 .node-status-dot.online { background: var(--accent-green); box-shadow: 0 0 5px var(--accent-green); }
 .node-status-dot.offline { background: var(--accent-red); box-shadow: 0 0 5px var(--accent-red); }
 
-.mini-stats { display: flex; gap: 8px; }
+.mini-stats { display: flex; gap: 8px; margin-bottom: 6px; align-items: center; }
+.mini-stats .lbl { font-size:10px; color:#888; width:28px; font-weight: bold; }
+.mini-stats .val { font-size:10px; color:#fff; font-family:var(--font-mono); width:60px; text-align:right; font-weight: 600; white-space: nowrap; }
+.mini-stats .val.gpu { color: #c084fc; }
+
 .mini-stat-bar { flex: 1; height: 4px; background: #222; border-radius: 2px; overflow: hidden; }
 .mini-stat-fill { height: 100%; transition: width 0.3s; }
 .mini-stat-fill.cpu { background: var(--accent-blue); }
 .mini-stat-fill.ram { background: var(--accent-green); }
+.mini-stat-fill.disk { background: #fde047; }
+.mini-stat-fill.gpu { background: #c084fc; }
 
 .sidebar-footer { padding: 20px; border-top: 1px solid var(--border-dim); display: flex; flex-direction: column; gap: 10px; }
 
@@ -170,8 +176,6 @@
 .term-sev-error { color: #f85149; font-weight: bold; margin-right: 8px; }
 .term-event { color: #c084fc; margin-right: 8px; font-weight: bold;}
 .term-msg { color: #ccc; }
-
-/* src/ui/css/layout.css İÇİNE EN ALTA EKLENECEK */
 
 .update-overlay {
     position: absolute; inset: 0; background: rgba(0,0,0,0.85); backdrop-filter: blur(3px);

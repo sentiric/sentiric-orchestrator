@@ -1,9 +1,9 @@
-// src/ui/js/app.js - YENİLENMİŞ DOSYA
+// src/ui/js/app.js
 import { WebSocketStream } from './websocket.js';
 import { TopologyMap } from './components/topology.js';
 import { Store } from './store.js';
 
-let isAppPaused = false; // Visibility API Kontrolü
+let isAppPaused = false; 
 
 const ui = {
     grid: document.getElementById('services-grid'),
@@ -40,7 +40,7 @@ const ui = {
         this.bindEvents();
         
         Store.subscribe((state) => {
-            if(isAppPaused) return; // [PERFORMANS KORUMASI]
+            if(isAppPaused) return; 
             requestAnimationFrame(() => {
                 this.renderSidebar(state);
                 this.updateSelectedNodeDOM(state); 
@@ -202,7 +202,7 @@ const ui = {
                         <span class="node-item-name">💠 ${nodeName}</span>
                         <div class="node-status-dot ${data.stats.status === 'ONLINE' ? 'online' : 'offline'}"></div>
                     </div>
-                    <div class="mini-stats">
+                    <div class="mini-stats" style="margin-bottom:0">
                         <div class="mini-stat-bar"><div style="width:${cpu}%" class="mini-stat-fill cpu"></div></div>
                         <div class="mini-stat-bar"><div style="width:${ram}%" class="mini-stat-fill ram"></div></div>
                     </div>
@@ -218,12 +218,14 @@ const ui = {
         const h = data.stats;
         const services = data.services;
 
+        // BİLGİLERİ EKRANA BAS
         const elHostName = document.getElementById('host-name');
         if(elHostName) elHostName.innerText = h.name;
         
+        // CPU & RAM
         const elHostCpuVal = document.getElementById('host-cpu-val');
         const elHostCpuBar = document.getElementById('host-cpu-bar');
-        if(elHostCpuVal) elHostCpuVal.innerText = `${h.cpu_usage.toFixed(1)}%`;
+        if(elHostCpuVal) elHostCpuVal.innerText = `${h.cpu_usage.toFixed(0)}%`;
         if(elHostCpuBar) elHostCpuBar.style.width = `${Math.min(h.cpu_usage, 100)}%`;
         
         const ramPct = h.ram_total > 0 ? (h.ram_used / h.ram_total) * 100 : 0;
@@ -231,6 +233,41 @@ const ui = {
         const elHostRamBar = document.getElementById('host-ram-bar');
         if(elHostRamVal) elHostRamVal.innerText = `${(h.ram_used/1024).toFixed(1)} GB`;
         if(elHostRamBar) elHostRamBar.style.width = `${Math.min(ramPct, 100)}%`;
+
+        // DISK
+        const diskPct = h.disk_total > 0 ? (h.disk_used / h.disk_total) * 100 : 0;
+        const elHostDiskVal = document.getElementById('host-disk-val');
+        const elHostDiskBar = document.getElementById('host-disk-bar');
+        if(elHostDiskVal) elHostDiskVal.innerText = `${h.disk_used} GB`;
+        if(elHostDiskBar) {
+            elHostDiskBar.style.width = `${Math.min(diskPct, 100)}%`;
+            if(diskPct > 85) elHostDiskBar.style.background = "var(--accent-red)";
+            else elHostDiskBar.style.background = "#fde047";
+        }
+
+        // NETWORK
+        const elHostNetVal = document.getElementById('host-net-val');
+        if(elHostNetVal) elHostNetVal.innerText = `${h.net_rx_mbs.toFixed(1)} ↓ | ${h.net_tx_mbs.toFixed(1)} ↑ MB/s`;
+
+        // GPU GİZLE/GÖSTER
+        const gpuContainer = document.getElementById('gpu-metrics-container');
+        if (h.gpu_mem_total > 0) {
+            if(gpuContainer) gpuContainer.style.display = 'block';
+            
+            const gpuUtilPct = h.gpu_usage;
+            const elHostGpuUtilVal = document.getElementById('host-gpu-util-val');
+            const elHostGpuUtilBar = document.getElementById('host-gpu-util-bar');
+            if(elHostGpuUtilVal) elHostGpuUtilVal.innerText = `${gpuUtilPct.toFixed(0)}%`;
+            if(elHostGpuUtilBar) elHostGpuUtilBar.style.width = `${Math.min(gpuUtilPct, 100)}%`;
+
+            const gpuMemPct = (h.gpu_mem_used / h.gpu_mem_total) * 100;
+            const elHostGpuMemVal = document.getElementById('host-gpu-mem-val');
+            const elHostGpuMemBar = document.getElementById('host-gpu-mem-bar');
+            if(elHostGpuMemVal) elHostGpuMemVal.innerText = `${(h.gpu_mem_used/1024).toFixed(1)} GB`;
+            if(elHostGpuMemBar) elHostGpuMemBar.style.width = `${Math.min(gpuMemPct, 100)}%`;
+        } else {
+            if(gpuContainer) gpuContainer.style.display = 'none';
+        }
 
         const loader = document.getElementById('grid-loader');
         if (loader) loader.style.display = 'none';
@@ -293,8 +330,8 @@ const ui = {
                     <div class="sparkline-box"><canvas id="cvs-ram-${svc.short_id}" class="sparkline-canvas" width="400" height="24"></canvas></div>
                 </div>
                 <div class="metric-row" style="flex-direction:row; gap:10px;">
-                    <div style="flex:1;"><div class="m-labels"><span class="lbl">NET I/O</span><span class="val net">0 MB/s</span></div></div>
-                    <div style="flex:1;"><div class="m-labels"><span class="lbl">DSK I/O</span><span class="val disk">0 MB/s</span></div></div>
+                    <div style="flex:1;"><div class="m-labels"><span class="lbl">NET</span><span class="val net">0 MB/s</span></div></div>
+                    <div style="flex:1;"><div class="m-labels"><span class="lbl">DSK</span><span class="val disk">0 MB/s</span></div></div>
                 </div>
             </div>
             <div class="svc-actions">
@@ -334,13 +371,11 @@ const ui = {
         cardData.ui.cpuText.innerText = `${svc.cpu_usage.toFixed(1)}%`;
         cardData.ui.ramText.innerText = `${svc.mem_usage} MB`;
         
-        // Network/Disk Render
         const totalNet = svc.net_rx_mbs + svc.net_tx_mbs;
         const totalDisk = svc.disk_read_mbs + svc.disk_write_mbs;
         cardData.ui.netText.innerText = `${totalNet.toFixed(2)} MB/s`;
         cardData.ui.diskText.innerText = `${totalDisk.toFixed(2)} MB/s`;
 
-        // Update Overlay Progress
         if (svc.update_progress || svc.health === 'Draining') {
             cardData.ui.overlayContainer.innerHTML = `
                 <div class="update-overlay">
@@ -392,7 +427,6 @@ const ui = {
     },
 
     openModal(id, name) {
-        // Modal kodu aynı kalıyor... (Kısaltıldı)
         if (!id || id === 'null') return;
         this.currentId = id;
         const modal = document.getElementById('info-modal');
@@ -494,7 +528,6 @@ const ui = {
 window.Store = Store; 
 window.ui = ui;
 
-// [PERFORMANS KORUMASI] - Visibility API
 document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
         console.log("💤 Uyku Modu (Tab gizli). CPU/RAM tasarrufu için render durduruldu.");
@@ -502,7 +535,6 @@ document.addEventListener("visibilitychange", () => {
     } else {
         console.log("👁️ Uyanış. Render devam ediyor.");
         isAppPaused = false;
-        // Tab uzun süre arkada kalırsa cache patlamasını önlemek için tam sayfa yenileme yap
         location.reload();
     }
 });
@@ -515,7 +547,7 @@ window.addEventListener('load', () => {
         if (msg.type === 'cluster_update') {
             Store.dispatch('CLUSTER_UPDATE', msg.data);
         } else if (msg.type === 'update_progress') {
-            Store.dispatch('UPDATE_PROGRESS', msg.data); // [YENİ] Backend'den gelen progress'i işle
+            Store.dispatch('UPDATE_PROGRESS', msg.data); 
         }
     }, (isOnline) => {
         ui.updateConnectionStatus(isOnline);

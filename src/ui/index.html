@@ -27,7 +27,7 @@
                 <div class="brand-logo">💠</div>
                 <div class="brand-text">
                     <h1>NEXUS</h1>
-                    <span>ORCHESTRATOR <span id="v-badge-desktop" style="color:var(--accent-blue)">v-.--</span></span>
+                    <span>SRE GOVERNOR <span id="v-badge-desktop" style="color:var(--accent-blue)">v-.--</span></span>
                 </div>
             </div>
 
@@ -38,25 +38,42 @@
 
             <div class="sidebar-footer">
                 <div class="area-title" style="padding:0 0 8px 0;">SELECTED NODE</div>
-                <div style="font-family:'JetBrains Mono'; font-size:13px; font-weight:700; color:#fff; margin-bottom:12px; word-break: break-all;" id="host-name">WAITING...</div>
+                <div style="font-family:'JetBrains Mono'; font-size:12px; font-weight:700; color:#fff; margin-bottom:15px; word-break: break-all;" id="host-name">WAITING...</div>
                 
-                <div class="mini-stats" style="margin-bottom: 8px;">
-                    <span style="font-size:10px; color:#888; width:25px;">CPU</span>
+                <div class="mini-stats">
+                    <span class="lbl">CPU</span>
                     <div class="mini-stat-bar"><div id="host-cpu-bar" class="mini-stat-fill cpu" style="width:0%"></div></div>
-                    <span style="font-size:10px; color:#fff; font-family:'JetBrains Mono'; width:45px; text-align:right;" id="host-cpu-val">0%</span>
+                    <span class="val" id="host-cpu-val">0%</span>
                 </div>
-                <div class="mini-stats" style="margin-bottom: 8px;">
-                    <span style="font-size:10px; color:#888; width:25px;">RAM</span>
+                <div class="mini-stats">
+                    <span class="lbl">RAM</span>
                     <div class="mini-stat-bar"><div id="host-ram-bar" class="mini-stat-fill ram" style="width:0%"></div></div>
-                    <span style="font-size:10px; color:#fff; font-family:'JetBrains Mono'; width:45px; text-align:right;" id="host-ram-val">0 GB</span>
+                    <span class="val" id="host-ram-val">0 GB</span>
                 </div>
-                <div class="mini-stats" style="margin-bottom: 20px;">
-                    <span style="font-size:10px; color:#888; width:25px;">GPU</span>
-                    <div class="mini-stat-bar"><div id="host-gpu-bar" class="mini-stat-fill gpu" style="width:0%; background:#c084fc;"></div></div>
-                    <span style="font-size:10px; color:#c084fc; font-family:'JetBrains Mono'; width:45px; text-align:right;" id="host-gpu-val">0 GB</span>
+                <div class="mini-stats">
+                    <span class="lbl">DSK</span>
+                    <div class="mini-stat-bar"><div id="host-disk-bar" class="mini-stat-fill disk" style="width:0%"></div></div>
+                    <span class="val" id="host-disk-val">0 GB</span>
+                </div>
+                <div class="mini-stats">
+                    <span class="lbl">NET</span>
+                    <span class="val" style="width:100%; text-align:right" id="host-net-val">0 ↓ | 0 ↑ MB/s</span>
                 </div>
 
-                <button id="btn-export" class="btn btn-primary" style="width: 100%;">🤖 AI DIAGNOSTIC EXPORT</button>
+                <div id="gpu-metrics-container" style="display:none; margin-top:8px;">
+                    <div class="mini-stats">
+                        <span class="lbl">GPU USE</span>
+                        <div class="mini-stat-bar"><div id="host-gpu-util-bar" class="mini-stat-fill gpu" style="width:0%;"></div></div>
+                        <span class="val gpu" id="host-gpu-util-val">0%</span>
+                    </div>
+                    <div class="mini-stats" style="margin-bottom: 12px;">
+                        <span class="lbl">GPU RAM</span>
+                        <div class="mini-stat-bar"><div id="host-gpu-mem-bar" class="mini-stat-fill gpu" style="width:0%;"></div></div>
+                        <span class="val gpu" id="host-gpu-mem-val">0 GB</span>
+                    </div>
+                </div>
+
+                <button id="btn-export" class="btn btn-primary" style="width: 100%; margin-top: 15px;">🤖 AI DIAGNOSTIC</button>
                 <button id="btn-prune" class="btn btn-danger" style="width: 100%; margin-top:8px;">♻️ SYSTEM PRUNE</button>
             </div>
         </aside>
@@ -68,7 +85,6 @@
                     <button id="btn-view-topology" class="view-btn">ARCHITECTURE MAP</button>
                 </div>
                 <div style="display:flex; align-items:center; gap:20px;">
-                    <!-- Self Update Butonu -->
                     <button id="btn-self-update" class="btn btn-info" style="font-size:9px;">🔄 UPDATE NEXUS</button>
                     <div style="font-size:11px; font-weight:bold; color:var(--accent-green); border:1px solid var(--accent-green-glow); padding:4px 10px; border-radius:4px; background:rgba(16,185,129,0.05);">GOVERNOR ACTIVE 👁️</div>
                     <div id="conn-status" class="conn-status offline">● OFFLINE</div>
@@ -110,7 +126,6 @@
             
             <div id="view-logs" class="modal-view active">
                 <div id="log-status" style="padding:10px; font-family:monospace; font-size:11px; color:#888;">Connecting to stream...</div>
-                <!-- Loglar artık bu div içine satır satır formatlanarak eklenecek -->
                 <div id="log-output" class="log-container" style="background:#000;"></div>
             </div>
 

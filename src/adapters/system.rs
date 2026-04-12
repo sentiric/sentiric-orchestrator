@@ -2,11 +2,12 @@
 use crate::core::domain::NodeStats;
 use std::process::Command;
 use std::time::Instant;
-use sysinfo::{Networks, System};
+use sysinfo::{Disks, Networks, System};
 
 pub struct SystemMonitor {
     sys: System,
     networks: Networks,
+    disks: Disks,
     node_name: String,
     last_update: Instant,
     last_net_rx: u64,
@@ -18,6 +19,7 @@ impl SystemMonitor {
         Self {
             sys: System::new_all(),
             networks: Networks::new_with_refreshed_list(),
+            disks: Disks::new_with_refreshed_list(),
             node_name,
             last_update: Instant::now(),
             last_net_rx: 0,
@@ -29,10 +31,12 @@ impl SystemMonitor {
         self.sys.refresh_cpu_usage();
         self.sys.refresh_memory();
         self.networks.refresh_list();
+        self.disks.refresh_list();
 
         let elapsed = self.last_update.elapsed().as_secs_f64().max(0.1);
         self.last_update = Instant::now();
 
+        // Ağ İstatistikleri (Delta)
         let mut current_rx = 0;
         let mut current_tx = 0;
         for (_interface_name, data) in &self.networks {
@@ -49,6 +53,18 @@ impl SystemMonitor {
         let net_rx_mbs = (rx_delta as f64 / elapsed) / 1_048_576.0;
         let net_tx_mbs = (tx_delta as f64 / elapsed) / 1_048_576.0;
 
+        // Disk İstatistikleri (Kapasite)
+        let mut disk_total_bytes = 0;
+        let mut disk_available_bytes = 0;
+        for disk in &self.disks {
+            disk_total_bytes += disk.total_space();
+            disk_available_bytes += disk.available_space();
+        }
+
+        // GB cinsine çevir
+        let disk_total_gb = disk_total_bytes / 1_073_741_824;
+        let disk_used_gb = (disk_total_bytes.saturating_sub(disk_available_bytes)) / 1_073_741_824;
+
         let (gpu_util, gpu_mem_used, gpu_mem_total) = self.get_gpu_metrics();
 
         NodeStats {
@@ -56,6 +72,8 @@ impl SystemMonitor {
             cpu_usage: self.sys.global_cpu_usage(),
             ram_used: self.sys.used_memory() / 1024 / 1024,
             ram_total: self.sys.total_memory() / 1024 / 1024,
+            disk_used: disk_used_gb,
+            disk_total: disk_total_gb,
             gpu_usage: gpu_util,
             gpu_mem_used,
             gpu_mem_total,

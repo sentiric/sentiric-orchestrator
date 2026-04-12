@@ -13,8 +13,8 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::{broadcast, Mutex};
-use tracing::info;
 use tracing::Instrument;
+use tracing::{info, warn};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter, Registry};
 
 use crate::adapters::docker::DockerAdapter;
@@ -75,7 +75,7 @@ async fn main() -> anyhow::Result<()> {
         service.version = env!("CARGO_PKG_VERSION"),
         node.name = %cfg.node_name,
         mode = if cfg.upstream_url.is_some() { "EDGE" } else { "MASTER" },
-        "💠 SENTIRIC ORCHESTRATOR v6.5.0 (ENTERPRISE GOVERNOR) Booting..."
+        "💠 SENTIRIC ORCHESTRATOR v6.6.0 (ENTERPRISE SRE GOVERNOR) Booting..."
     );
 
     let (tx, _) = broadcast::channel::<String>(100);
@@ -99,17 +99,38 @@ async fn main() -> anyhow::Result<()> {
         update_locks: Mutex::new(HashSet::new()),
     });
 
-    // 1. SYSTEM MONITOR
+    // 1. SYSTEM MONITOR & OTONOM KORUMA
     let mon_state = state.clone();
     let mon_node = cfg.node_name.clone();
     let mon_tx = tx.clone();
 
     tokio::spawn(async move {
+        // İlk açılışta hemen prune yapmaması için başlangıç süresini 1 saat geriye alıyoruz.
+        let mut last_prune_time = Instant::now() - Duration::from_secs(3600);
+
         loop {
             let stats = sys_mon.snapshot();
             let mut node_cache = mon_state.node_stats_cache.lock().await;
             *node_cache = stats.clone();
             drop(node_cache);
+
+            // [SRE OTONOM KORUMA]: Disk %85'i geçerse ve son 1 saatte temizlenmediyse Auto-Prune tetikle
+            let disk_pct = if stats.disk_total > 0 {
+                (stats.disk_used as f64 / stats.disk_total as f64) * 100.0
+            } else {
+                0.0
+            };
+
+            if disk_pct > 85.0 && last_prune_time.elapsed().as_secs() > 3600 {
+                warn!(event="AUTO_PRUNE_TRIGGERED", disk_usage_pct=%disk_pct, "🚨 Disk space critical (>85%). Triggering autonomous system prune.");
+
+                let docker_clone = mon_state.docker.clone();
+                tokio::spawn(async move {
+                    let _ = docker_clone.prune_system().await;
+                });
+
+                last_prune_time = Instant::now();
+            }
 
             let svcs = mon_state
                 .services_cache
@@ -315,7 +336,6 @@ async fn main() -> anyhow::Result<()> {
 
                     let has_gpu =
                         name.contains("llm") || name.contains("stt") || name.contains("tts");
-
                     let progress = cache.get(&name).and_then(|s| s.update_progress.clone());
 
                     let svc = ServiceInstance {
