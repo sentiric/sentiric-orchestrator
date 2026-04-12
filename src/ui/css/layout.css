@@ -46,7 +46,15 @@
 
 .mini-stats { display: flex; gap: 8px; margin-bottom: 6px; align-items: center; }
 .mini-stats .lbl { font-size:10px; color:#888; width:28px; font-weight: bold; }
-.mini-stats .val { font-size:10px; color:#fff; font-family:var(--font-mono); width:60px; text-align:right; font-weight: 600; white-space: nowrap; }
+.mini-stats .val { 
+    font-size:10px; 
+    color:#fff; 
+    font-family:var(--font-mono); 
+    width:80px; /* <--- GENİŞLETİLDİ */
+    text-align:right; 
+    font-weight: 600; 
+    white-space: nowrap; 
+}
 .mini-stats .val.gpu { color: #c084fc; }
 
 .mini-stat-bar { flex: 1; height: 4px; background: #222; border-radius: 2px; overflow: hidden; }

@@ -40,7 +40,7 @@ const ui = {
         this.bindEvents();
         
         Store.subscribe((state) => {
-            if(isAppPaused) return; 
+            if(isAppPaused) return; // Görünürlük Koruması
             requestAnimationFrame(() => {
                 this.renderSidebar(state);
                 this.updateSelectedNodeDOM(state); 
@@ -222,23 +222,24 @@ const ui = {
         const elHostName = document.getElementById('host-name');
         if(elHostName) elHostName.innerText = h.name;
         
-        // CPU & RAM
+        // CPU
         const elHostCpuVal = document.getElementById('host-cpu-val');
         const elHostCpuBar = document.getElementById('host-cpu-bar');
         if(elHostCpuVal) elHostCpuVal.innerText = `${h.cpu_usage.toFixed(0)}%`;
         if(elHostCpuBar) elHostCpuBar.style.width = `${Math.min(h.cpu_usage, 100)}%`;
         
+        // RAM (Kullanılan / Toplam GB Formatı)
         const ramPct = h.ram_total > 0 ? (h.ram_used / h.ram_total) * 100 : 0;
         const elHostRamVal = document.getElementById('host-ram-val');
         const elHostRamBar = document.getElementById('host-ram-bar');
-        if(elHostRamVal) elHostRamVal.innerText = `${(h.ram_used/1024).toFixed(1)} GB`;
+        if(elHostRamVal) elHostRamVal.innerText = `${(h.ram_used/1024).toFixed(1)}/${(h.ram_total/1024).toFixed(1)} GB`;
         if(elHostRamBar) elHostRamBar.style.width = `${Math.min(ramPct, 100)}%`;
 
-        // DISK
+        // DISK (Kullanılan / Toplam GB Formatı)
         const diskPct = h.disk_total > 0 ? (h.disk_used / h.disk_total) * 100 : 0;
         const elHostDiskVal = document.getElementById('host-disk-val');
         const elHostDiskBar = document.getElementById('host-disk-bar');
-        if(elHostDiskVal) elHostDiskVal.innerText = `${h.disk_used} GB`;
+        if(elHostDiskVal) elHostDiskVal.innerText = `${h.disk_used}/${h.disk_total} GB`;
         if(elHostDiskBar) {
             elHostDiskBar.style.width = `${Math.min(diskPct, 100)}%`;
             if(diskPct > 85) elHostDiskBar.style.background = "var(--accent-red)";
@@ -263,7 +264,7 @@ const ui = {
             const gpuMemPct = (h.gpu_mem_used / h.gpu_mem_total) * 100;
             const elHostGpuMemVal = document.getElementById('host-gpu-mem-val');
             const elHostGpuMemBar = document.getElementById('host-gpu-mem-bar');
-            if(elHostGpuMemVal) elHostGpuMemVal.innerText = `${(h.gpu_mem_used/1024).toFixed(1)} GB`;
+            if(elHostGpuMemVal) elHostGpuMemVal.innerText = `${(h.gpu_mem_used/1024).toFixed(1)}/${(h.gpu_mem_total/1024).toFixed(1)} GB`;
             if(elHostGpuMemBar) elHostGpuMemBar.style.width = `${Math.min(gpuMemPct, 100)}%`;
         } else {
             if(gpuContainer) gpuContainer.style.display = 'none';
@@ -528,6 +529,7 @@ const ui = {
 window.Store = Store; 
 window.ui = ui;
 
+// [KRİTİK DÜZELTME]: Refresh (reload) kaldırıldı, sadece state resume ediliyor.
 document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
         console.log("💤 Uyku Modu (Tab gizli). CPU/RAM tasarrufu için render durduruldu.");
@@ -535,7 +537,8 @@ document.addEventListener("visibilitychange", () => {
     } else {
         console.log("👁️ Uyanış. Render devam ediyor.");
         isAppPaused = false;
-        location.reload();
+        // Kaydırma barını en aşağı iterek düzgün görünmesini sağla
+        if(ui.matrix) ui.matrix.shouldScroll = true;
     }
 });
 
