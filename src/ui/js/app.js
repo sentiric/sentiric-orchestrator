@@ -121,6 +121,30 @@ const ui = {
             }
         });
 
+        // [ARCH-COMPLIANCE]: Nexus Governor Self-Update Button Binding
+        this.safeClick('btn-self-update', async () => {
+            if(confirm("Pull the latest Nexus Governor image?\n\n(Note: This will download the update. You will need to run 'make start' on the host to restart the governor safely.)")) {
+                const btn = document.getElementById('btn-self-update');
+                const origText = btn.innerHTML;
+                btn.innerHTML = "⏳ PULLING...";
+                btn.disabled = true;
+                try {
+                    const res = await fetch(`/api/system/self-update`, { method: 'POST' });
+                    const msg = await res.text();
+                    if (res.ok) {
+                        alert(msg); // Başarı mesajını ve talimatı göster
+                    } else {
+                        alert("❌ Update failed: " + msg);
+                    }
+                } catch(e) {
+                    alert("❌ Connection error during update.");
+                } finally {
+                    btn.innerHTML = origText;
+                    btn.disabled = false;
+                }
+            }
+        });        
+
         this.safeClick('btn-export', async () => {
             try {
                 const res = await fetch('/api/export/llm');

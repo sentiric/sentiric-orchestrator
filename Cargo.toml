@@ -1,6 +1,6 @@
 [package]
 name = "sentiric-orchestrator"
-version = "6.6.2"
+version = "6.6.3"
 edition = "2021"
 
 [dependencies]

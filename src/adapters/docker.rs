@@ -419,4 +419,45 @@ impl DockerAdapter {
             }
         }
     }
+
+    // [ARCH-COMPLIANCE]: Güvenli Nexus Güncelleme (İntihar Yasağı Korumalı)
+    pub async fn pull_nexus_image(&self) -> Result<String> {
+        let svc_name = "orchestrator-service";
+        info!(
+            event = "NEXUS_SELF_UPDATE",
+            "Initiating Nexus safe pull sequence."
+        );
+
+        let inspect = self
+            .client
+            .inspect_container(svc_name, None::<InspectContainerOptions>)
+            .await?;
+        let image_name = inspect
+            .config
+            .as_ref()
+            .and_then(|c| c.image.clone())
+            .unwrap_or_else(|| "ghcr.io/sentiric/sentiric-orchestrator:latest".to_string());
+
+        let mut stream = self.client.create_image(
+            Some(CreateImageOptions {
+                from_image: image_name,
+                ..Default::default()
+            }),
+            None,
+            None,
+        );
+
+        while let Some(res) = stream.next().await {
+            if let Err(e) = res {
+                error!(event="NEXUS_PULL_ERROR", error=%e, "Failed to pull Nexus image.");
+                return Err(anyhow::anyhow!("Pull error: {}", e));
+            }
+        }
+
+        info!(
+            event = "NEXUS_PULL_SUCCESS",
+            "Nexus image downloaded safely."
+        );
+        Ok("✅ Nexus Governor Update Downloaded!\n\nTo prevent cluster brain-death, Orchestrator cannot kill itself.\nPlease run 'make start' on the host terminal to apply the update safely.".to_string())
+    }
 }

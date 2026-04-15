@@ -40,6 +40,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/service/:id/restart", post(restart_handler))
         .route("/api/service/:id/inspect", get(inspect_handler))
         .route("/api/system/prune", post(prune_handler))
+        .route("/api/system/self-update", post(self_update_handler)) // <--- BURA EKLENECEK
         .route("/api/export/llm", get(export_llm_handler))
         .route("/api/ingest/report", post(ingest_report_handler))
         .with_state(state)
@@ -409,6 +410,13 @@ async fn inspect_handler(State(state): State<Arc<AppState>>, Path(id): Path<Stri
 async fn prune_handler(State(state): State<Arc<AppState>>) -> Response {
     match state.docker.prune_system().await {
         Ok(m) => (StatusCode::OK, m).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+async fn self_update_handler(State(state): State<Arc<AppState>>) -> Response {
+    match state.docker.pull_nexus_image().await {
+        Ok(msg) => (StatusCode::OK, msg).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
