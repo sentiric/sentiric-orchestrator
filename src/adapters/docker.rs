@@ -166,7 +166,7 @@ impl DockerAdapter {
         Ok(msg)
     }
 
-    // --- UPDATE ENGINE ---
+    // --- UPDATE ENGINE & SRE AUTO-ROLLBACK ---
     pub async fn check_and_update_service(&self, svc_name: &str) -> Result<bool> {
         debug!(
             event="CHECK_UPDATES",
@@ -189,6 +189,20 @@ impl DockerAdapter {
             .ok_or_else(|| anyhow::anyhow!("No image defined"))?;
 
         let is_self = svc_name.contains("orchestrator");
+
+        // [ARCH-COMPLIANCE FIX]: Eski konfigürasyonu Rollback için sakla
+        let old_config = Config {
+            image: Some(current_image_id.clone()), // Rollback'te eski Image ID kullanılır
+            env: inspect.config.as_ref().and_then(|c| c.env.clone()),
+            labels: inspect.config.as_ref().and_then(|c| c.labels.clone()),
+            host_config: inspect.host_config.clone(),
+            networking_config: inspect.network_settings.as_ref().map(|n| {
+                bollard::container::NetworkingConfig {
+                    endpoints_config: n.networks.clone().unwrap_or_default(),
+                }
+            }),
+            ..Default::default()
+        };
 
         // 1. PULL (Yeni imajı çek ve Progress bildir)
         let mut stream = docker.create_image(
@@ -221,7 +235,7 @@ impl DockerAdapter {
                     } else {
                         status.clone()
                     }
-                    .replace("\n", ""); // Konsoldan gelen gereksiz kaçış karakterlerini temizle
+                    .replace("\n", "");
 
                     let _ = self.tx.send(
                         serde_json::json!({
@@ -265,7 +279,7 @@ impl DockerAdapter {
             return Ok(true);
         }
 
-        let config = Config {
+        let new_config = Config {
             image: Some(image_name.clone()),
             env: inspect.config.as_ref().and_then(|c| c.env.clone()),
             labels: inspect.config.as_ref().and_then(|c| c.labels.clone()),
@@ -280,18 +294,29 @@ impl DockerAdapter {
 
         // 3. ZERO-DOWNTIME GRACEFUL SHUTDOWN (Dökülme/Drain)
         info!(event="CONTAINER_DRAINING", service=%svc_name, "🛑 Sending SIGTERM for graceful drain: [{}]", svc_name);
-
-        let _ = self.tx.send(
-            serde_json::json!({ "type": "update_progress", "data": { "service": svc_name, "progress": "DRAINING (60s)" } }).to_string(),
-        );
+        let _ = self.tx.send(serde_json::json!({ "type": "update_progress", "data": { "service": svc_name, "progress": "DRAINING (60s)" } }).to_string());
 
         let stop_opts = Some(StopContainerOptions { t: 60 });
         match docker.stop_container(svc_name, stop_opts).await {
             Ok(_) => {
-                info!(event="CONTAINER_STOPPED", service=%svc_name, "🛑 Container stopped successfully.")
+                info!(event="CONTAINER_STOP_SIGNALED", service=%svc_name, "🛑 Stop signal sent.")
             }
             Err(e) => {
-                warn!(event="CONTAINER_STOP_ERROR", service=%svc_name, error=%e, "⚠️ Error while stopping container: {}", e)
+                warn!(event="CONTAINER_STOP_ERROR", service=%svc_name, error=%e, "⚠️ Error while stopping container (maybe already stopped): {}", e)
+            }
+        }
+
+        // [ARCH-COMPLIANCE FIX]: Race Condition Koruması. Gerçekten kapanmasını bekle.
+        let mut wait_stream = docker.wait_container(
+            svc_name,
+            None::<bollard::container::WaitContainerOptions<String>>,
+        );
+        tokio::select! {
+            _ = wait_stream.next() => {
+                debug!(event="CONTAINER_HALTED", service=%svc_name, "Container execution halted completely.");
+            }
+            _ = tokio::time::sleep(std::time::Duration::from_secs(65)) => {
+                warn!(event="CONTAINER_WAIT_TIMEOUT", service=%svc_name, "Timeout waiting for container to stop. Forcing removal.");
             }
         }
 
@@ -301,7 +326,7 @@ impl DockerAdapter {
         });
         match docker.remove_container(svc_name, remove_opts).await {
             Ok(_) => {
-                info!(event="CONTAINER_REMOVED", service=%svc_name, "💀 Old container removed.")
+                info!(event="CONTAINER_REMOVED", service=%svc_name, "💀 Old container completely removed.")
             }
             Err(e) => {
                 warn!(event="CONTAINER_REMOVE_ERROR", service=%svc_name, error=%e, "⚠️ Error while removing container: {}", e)
@@ -309,9 +334,7 @@ impl DockerAdapter {
         }
 
         info!(event="CONTAINER_RECREATING", service=%svc_name, "✨ Creating updated container: [{}]", svc_name);
-        let _ = self.tx.send(
-            serde_json::json!({ "type": "update_progress", "data": { "service": svc_name, "progress": "STARTING..." } }).to_string(),
-        );
+        let _ = self.tx.send(serde_json::json!({ "type": "update_progress", "data": { "service": svc_name, "progress": "STARTING..." } }).to_string());
 
         if let Err(e) = docker
             .create_container(
@@ -319,14 +342,12 @@ impl DockerAdapter {
                     name: svc_name.to_string(),
                     platform: None,
                 }),
-                config,
+                new_config,
             )
             .await
         {
             error!(event="CONTAINER_CREATE_ERROR", service=%svc_name, error=%e, "❌ Failed to create container: {}", e);
-            let _ = self.tx.send(
-                serde_json::json!({ "type": "update_progress", "data": { "service": svc_name, "progress": null } }).to_string(),
-            );
+            let _ = self.tx.send(serde_json::json!({ "type": "update_progress", "data": { "service": svc_name, "progress": null } }).to_string());
             return Err(anyhow::anyhow!("Container create failed"));
         }
 
@@ -335,17 +356,51 @@ impl DockerAdapter {
             .await
         {
             error!(event="CONTAINER_START_ERROR", service=%svc_name, error=%e, "❌ Failed to start container: {}", e);
-            let _ = self.tx.send(
-                serde_json::json!({ "type": "update_progress", "data": { "service": svc_name, "progress": null } }).to_string(),
-            );
+            let _ = self.tx.send(serde_json::json!({ "type": "update_progress", "data": { "service": svc_name, "progress": null } }).to_string());
             return Err(anyhow::anyhow!("Container start failed"));
         }
 
-        info!(event="AUTO_PILOT_SUCCESS", service=%svc_name, "✅ [{}] updated and started successfully.", svc_name);
+        // [ARCH-COMPLIANCE FIX]: SRE Auto-Rollback Mekanizması
+        let _ = self.tx.send(serde_json::json!({ "type": "update_progress", "data": { "service": svc_name, "progress": "HEALTH CHECK (5s)..." } }).to_string());
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
 
-        let _ = self.tx.send(
-            serde_json::json!({ "type": "update_progress", "data": { "service": svc_name, "progress": null } }).to_string(),
-        );
+        if let Ok(verify_inspect) = docker
+            .inspect_container(svc_name, None::<InspectContainerOptions>)
+            .await
+        {
+            if let Some(state) = verify_inspect.state {
+                if state.running != Some(true) {
+                    error!(event="AUTO_ROLLBACK_TRIGGERED", service=%svc_name, "🚨 New version crashed instantly! Initiating Auto-Rollback to previous stable state.");
+                    let _ = self.tx.send(serde_json::json!({ "type": "update_progress", "data": { "service": svc_name, "progress": "ROLLBACK IN PROGRESS🚨" } }).to_string());
+
+                    let _ = docker.remove_container(svc_name, remove_opts).await;
+                    if docker
+                        .create_container(
+                            Some(CreateContainerOptions {
+                                name: svc_name.to_string(),
+                                platform: None,
+                            }),
+                            old_config,
+                        )
+                        .await
+                        .is_ok()
+                    {
+                        let _ = docker
+                            .start_container(svc_name, None::<StartContainerOptions<String>>)
+                            .await;
+                        info!(event="AUTO_ROLLBACK_SUCCESS", service=%svc_name, "♻️ Service rolled back to previous stable image.");
+                    } else {
+                        error!(event="AUTO_ROLLBACK_FAILED", service=%svc_name, "❌ Fatal Error: Failed to rollback service.");
+                    }
+
+                    let _ = self.tx.send(serde_json::json!({ "type": "update_progress", "data": { "service": svc_name, "progress": null } }).to_string());
+                    return Ok(false);
+                }
+            }
+        }
+
+        info!(event="AUTO_PILOT_SUCCESS", service=%svc_name, "✅ [{}] updated and verified successfully.", svc_name);
+        let _ = self.tx.send(serde_json::json!({ "type": "update_progress", "data": { "service": svc_name, "progress": null } }).to_string());
 
         Ok(true)
     }

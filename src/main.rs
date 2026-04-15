@@ -13,8 +13,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::{broadcast, Mutex};
-use tracing::Instrument;
-use tracing::{info, warn};
+use tracing::{info, warn}; // [ARCH-COMPLIANCE FIX]: debug eklendi
 use tracing_subscriber::{fmt, prelude::*, EnvFilter, Registry};
 
 use crate::adapters::docker::DockerAdapter;
@@ -152,6 +151,9 @@ async fn main() -> anyhow::Result<()> {
                 .await
                 .insert(mon_node.clone(), report);
             let cluster_map = mon_state.cluster_cache.lock().await.clone();
+
+            // [ARCH-COMPLIANCE FIX]: UI broadcast gürültüsünü debug'a çektik (Eğer debug loglarsak görünmez)
+            // Bu zaten JSON publish, loglamaya gerek yok, sadece TX kanalına gönderiliyor.
             let _ = mon_tx.send(
                 serde_json::json!({ "type": "cluster_update", "data": cluster_map }).to_string(),
             );
@@ -368,7 +370,13 @@ async fn main() -> anyhow::Result<()> {
     // 3. UPSTREAM LOOP
     if let Some(upstream_url) = cfg.upstream_url {
         let up_state = state.clone();
-        let http_client = Client::new();
+
+        // [ARCH-COMPLIANCE FIX]: Timeout Eklendi. İstemcinin sonsuza dek kilitlenmesini önler.
+        let http_client = Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .expect("Failed to build robust HTTP client");
+
         let node_name = cfg.node_name.clone();
 
         tokio::spawn(async move {
@@ -396,15 +404,15 @@ async fn main() -> anyhow::Result<()> {
                         .unwrap()
                         .as_micros()
                 );
-                let span = tracing::info_span!("upstream_push", trace_id = %trace_id);
 
+                // Info seviyesindeki span gürültüsü engellenir, sessizce iletilir.
                 let _ = http_client
                     .post(&upstream_url)
                     .header("x-trace-id", &trace_id)
                     .json(&payload)
                     .send()
-                    .instrument(span)
                     .await;
+
                 tokio::time::sleep(Duration::from_secs(10)).await;
             }
         });

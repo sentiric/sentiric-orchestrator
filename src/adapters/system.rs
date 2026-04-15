@@ -41,7 +41,6 @@ impl SystemMonitor {
         let mut current_tx = 0;
         for (interface_name, data) in &self.networks {
             let name = interface_name.to_lowercase();
-            // Docker köprülerini, sanal arayüzleri ve loopback'i atlıyoruz (Çift sayımı önler)
             if name.starts_with("veth")
                 || name.starts_with("br-")
                 || name.starts_with("docker")
@@ -62,31 +61,42 @@ impl SystemMonitor {
         let net_rx_mbs = (rx_delta as f64 / elapsed) / 1_048_576.0;
         let net_tx_mbs = (tx_delta as f64 / elapsed) / 1_048_576.0;
 
-        // 2. DİSK İSTATİSTİKLERİ (SANAL DİSKLERİ GÖZ ARDI ET)
+        // 2. DİSK İSTATİSTİKLERİ [ARCH-COMPLIANCE FIX: Whitelist & Deduplication]
         let mut disk_total_bytes = 0;
         let mut disk_used_bytes = 0;
+        let mut processed_devices = std::collections::HashSet::new();
 
         for disk in &self.disks {
-            // [KRİTİK DÜZELTME]: Cross-platform OsStr dönüşümü
             let fs_type = disk.file_system().to_string_lossy().to_lowercase();
-            let mount_point = disk.mount_point().to_string_lossy().to_lowercase();
+            let device_name = disk.name().to_string_lossy().to_string();
 
-            // Snap (squashfs), RAM disk (tmpfs), Docker (overlay) ve /boot partitionlarını filtrele
-            if fs_type.contains("squashfs")
-                || fs_type.contains("tmpfs")
-                || fs_type.contains("overlay")
-                || fs_type.contains("devtmpfs")
-                || fs_type.contains("efivarfs")
-                || mount_point.starts_with("/boot")
+            // Sadece fiziksel dosya sistemlerini kabul et
+            if fs_type == "ext4"
+                || fs_type == "ext3"
+                || fs_type == "xfs"
+                || fs_type == "btrfs"
+                || fs_type == "zfs"
+                || fs_type == "vfat"
             {
-                continue;
+                // Aynı fiziksel diski birden fazla mount noktasından okumamak için tekilleştir
+                if processed_devices.insert(device_name) {
+                    disk_total_bytes += disk.total_space();
+                    disk_used_bytes += disk.total_space().saturating_sub(disk.available_space());
+                }
             }
-
-            disk_total_bytes += disk.total_space();
-            disk_used_bytes += disk.total_space().saturating_sub(disk.available_space());
         }
 
-        // GB cinsine çevir
+        // Eğer Container izolasyonundan dolayı fiziksel disk bulunamazsa (Fallback Mechanism)
+        if disk_total_bytes == 0 {
+            for disk in &self.disks {
+                if disk.mount_point().to_string_lossy() == "/" {
+                    disk_total_bytes = disk.total_space();
+                    disk_used_bytes = disk.total_space().saturating_sub(disk.available_space());
+                    break;
+                }
+            }
+        }
+
         let disk_total_gb = disk_total_bytes / 1_073_741_824;
         let disk_used_gb = disk_used_bytes / 1_073_741_824;
 
